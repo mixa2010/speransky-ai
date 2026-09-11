@@ -435,8 +435,17 @@ function highlightAnswer(root) {
       el.innerHTML = el.innerHTML.replace(
         /^\s*(<[^>]+>\s*)*(?:Ответ|ОТВЕТ|Итог|ИТОГ)\s*[:.]\s*/i, '$1');
       while (el.firstChild) body.appendChild(el.firstChild);
+      // если сразу за строкой «Ответ:» идёт список ответов — тянем его в рамку
+      const absorb = [];
+      let nxt = el.nextElementSibling;
+      while (nxt && absorb.length < 2 &&
+             (nxt.tagName === 'UL' || nxt.tagName === 'OL')) {
+        absorb.push(nxt);
+        nxt = nxt.nextElementSibling;
+      }
       box.appendChild(body);
       el.replaceWith(box);
+      absorb.forEach(node => body.appendChild(node));
     }
   }
 }
@@ -495,13 +504,42 @@ function renderInto(container, rawText, parts) {
 }
 
 /* ================= Данные ================= */
-async function loadAnswer(id) {
+async function fetchAnswerOnce(id) {
   const base = API_BASE.replace(/\/+$/, '');
-  const url = `${base}/api/answer?id=${encodeURIComponent(id)}`;
+  // БОЕВОЙ маршрут бота на Render: /a/<id> (демо-сервер отвечает там же).
+  const url = `${base}/a/${encodeURIComponent(id)}`;
   const res = await fetch(url, { headers: { Accept: 'application/json' } });
   if (res.status === 404) throw Object.assign(new Error('not found'), { code: 404 });
-  if (!res.ok) throw new Error('HTTP ' + res.status);
+  if (!res.ok) throw Object.assign(new Error('HTTP ' + res.status), { code: res.status });
+  const ct = (res.headers.get('Content-Type') || '');
+  if (!ct.includes('application/json')) {
+    // сервер ответил чем-то посторонним (например, «bot is alive»)
+    throw Object.assign(new Error('not json'), { code: 502 });
+  }
   return res.json();
+}
+
+/* Render на бесплатном тарифе может спать/перезапускаться: сетевая ошибка
+   или 5xx — не повод сдаваться, пробуем ещё раз с растущей паузой.
+   404 не ретраим: разбора действительно нет. */
+async function loadAnswer(id) {
+  const tries = 3;
+  let lastErr = null;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await fetchAnswerOnce(id);
+    } catch (e) {
+      lastErr = e;
+      if (e && e.code === 404) throw e;
+      if (i < tries - 1) {
+        const w = $('#warn');
+        w.hidden = false;
+        w.textContent = `⏳ Сервер с решениями не ответил (спит или перезапускается). Пробую ещё раз… (${i + 1}/${tries - 1})`;
+        await new Promise(r => setTimeout(r, 2500 * (i + 1)));
+      }
+    }
+  }
+  throw lastErr;
 }
 
 function metaChips(data) {
@@ -610,12 +648,17 @@ function showGallery(ids) {
   setupButtons({ plain: '' });
 }
 
-function showFatal(text) {
+function showFatal(text, canRetry) {
   $('#boot').hidden = true;
   $('#view').hidden = true;
   const f = $('#fatal');
   f.hidden = false;
   if (text) $('#fatal-text').textContent = text;
+  const btn = document.getElementById('fatal-retry');
+  if (btn) {
+    btn.hidden = !canRetry;
+    btn.onclick = () => location.reload();
+  }
 }
 
 /* ================= Старт ================= */
@@ -636,14 +679,18 @@ async function boot() {
         if (j && Array.isArray(j.ids) && j.ids.length) return showGallery(j.ids);
       }
     } catch (e) { /* нет витрины — покажем подсказку */ }
-    return showFatal('Открой эту страницу по ссылке из бота — в ней есть id решения.');
+    return showFatal('Открой эту страницу по ссылке из бота — в ней есть id решения.', false);
   }
   try {
     await render(id);
   } catch (e) {
-    showFatal(e && e.code === 404
+    const is404 = !!(e && e.code === 404);
+    showFatal(is404
       ? 'Такое решение не найдено или срок ссылки истёк.'
-      : 'Не удалось получить решение: ' + (e && e.message ? e.message : 'ошибка сети'));
+      : 'Не удалось достучаться до сервера с решениями (Render). Обычно это ' +
+        'значит: сервис спал и просыпался, или на минуту пропала сеть. ' +
+        'Страница уже попробовала несколько раз — нажми «Повторить».',
+      !is404);
   }
 }
 

@@ -87,6 +87,7 @@ body { padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px)); }
 .fatal h1 { font-size: 21px; margin: 10px 0 6px; }
 .fatal p  { color: var(--hint); font-size: 15px; margin: 6px 0; }
 .fatal-hint { font-size: 13.5px; opacity: .85; }
+.fatal-retry { margin-top: 14px; padding: 10px 24px; font-size: 15px; }
 
 /* ---------------- Шапка ---------------- */
 #head {
