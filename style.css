@@ -1,0 +1,329 @@
+/* ============================================================
+   Сперанский AI — Mini App
+   Переменные берутся из темы Telegram, если мы внутри Telegram,
+   иначе — из prefers-color-scheme. Ниже заданы оба набора.
+   ============================================================ */
+
+:root {
+  --bg:        var(--tg-theme-bg-color, #0f1115);
+  --card:      var(--tg-theme-secondary-bg-color, #171a21);
+  --text:      var(--tg-theme-text-color, #e8eaed);
+  --hint:      var(--tg-theme-hint-color, #9aa0aa);
+  --link:      var(--tg-theme-link-color, #6ab3ff);
+  --accent:    var(--tg-theme-button-color, #3f8cff);
+  --accent-tx: var(--tg-theme-button-text-color, #ffffff);
+  --border:    rgba(128, 138, 155, .22);
+  --code-bg:   rgba(128, 138, 155, .14);
+  --ok:        #42c47a;
+  --bad:       #ff6b6b;
+  --radius:    16px;
+  --fs:        17px;
+  --pad:       16px;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+          "Liberation Mono", monospace;
+}
+
+/* Светлая тема Telegram сама подставит свои переменные.
+   Если Telegram нет — реагируем на системную тему. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-tg-theme]) {
+    --bg:      #f5f6f8;
+    --card:    #ffffff;
+    --text:    #14161a;
+    --hint:    #6b7280;
+    --border:  rgba(20, 30, 50, .12);
+    --code-bg: rgba(20, 30, 50, .06);
+  }
+}
+
+* { box-sizing: border-box; }
+
+/* hidden обязан побеждать любые display из классов */
+[hidden] { display: none !important; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+               "Helvetica Neue", Arial, sans-serif;
+  font-size: var(--fs);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior-y: none;
+}
+
+body { padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px)); }
+
+/* ---------------- Загрузка ---------------- */
+.boot {
+  min-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+.boot-text { color: var(--hint); font-size: 15px; }
+.spinner {
+  width: 34px; height: 34px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------------- Ошибка ---------------- */
+.fatal {
+  max-width: 560px;
+  margin: 12vh auto 0;
+  padding: 0 20px;
+  text-align: center;
+}
+.fatal-emoji { font-size: 44px; }
+.fatal h1 { font-size: 21px; margin: 10px 0 6px; }
+.fatal p  { color: var(--hint); font-size: 15px; margin: 6px 0; }
+.fatal-hint { font-size: 13.5px; opacity: .85; }
+
+/* ---------------- Шапка ---------------- */
+#head {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter: saturate(1.4) blur(10px);
+  -webkit-backdrop-filter: saturate(1.4) blur(10px);
+  border-bottom: 1px solid var(--border);
+  padding: calc(10px + env(safe-area-inset-top, 0px)) var(--pad) 10px;
+}
+.head-row { display: flex; align-items: center; gap: 10px; }
+.head-title { font-weight: 650; font-size: 16.5px; flex: 1;
+              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.head-actions { display: flex; gap: 6px; }
+.icon-btn {
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: transform .08s ease, opacity .15s ease;
+}
+.icon-btn:active { transform: scale(.94); opacity: .8; }
+.head-meta { color: var(--hint); font-size: 12.5px; margin-top: 4px;
+             display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.chip.ok  { color: var(--ok);  border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.chip.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+
+/* ---------------- Предупреждение ---------------- */
+.warn {
+  margin: 12px var(--pad) 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, #ffb020 45%, transparent);
+  background: color-mix(in srgb, #ffb020 12%, transparent);
+  color: var(--text);
+  font-size: 13.5px;
+}
+
+/* ---------------- Контент ---------------- */
+.content {
+  padding: 16px var(--pad) 0;
+  max-width: 860px;
+  margin: 0 auto;
+  overflow-wrap: break-word;
+}
+.content h1, .content h2, .content h3, .content h4 {
+  line-height: 1.3;
+  margin: 1.35em 0 .5em;
+  font-weight: 680;
+}
+.content h1 { font-size: 1.30em; }
+.content h2 { font-size: 1.18em; }
+.content h3 { font-size: 1.08em; }
+.content h4 { font-size: 1.00em; color: var(--hint); }
+.content h1:first-child, .content h2:first-child, .content h3:first-child {
+  margin-top: .2em;
+}
+.content p { margin: .7em 0; }
+.content ul, .content ol { margin: .6em 0; padding-left: 1.35em; }
+.content li { margin: .3em 0; }
+.content li::marker { color: var(--hint); }
+.content hr {
+  border: 0; border-top: 1px solid var(--border);
+  margin: 22px 0;
+}
+.content a { color: var(--link); text-decoration: none; }
+.content a:active { opacity: .7; }
+
+.content strong { font-weight: 700; }
+.content em { font-style: italic; color: color-mix(in srgb, var(--text) 88%, var(--hint)); }
+
+.content blockquote {
+  margin: 14px 0;
+  padding: 12px 14px;
+  border-left: 3px solid var(--accent);
+  background: var(--card);
+  border-radius: 0 12px 12px 0;
+  overflow-x: auto;
+}
+.content blockquote p:first-child { margin-top: 0; }
+.content blockquote p:last-child  { margin-bottom: 0; }
+
+.content code {
+  font-family: var(--mono);
+  font-size: .88em;
+  background: var(--code-bg);
+  padding: .12em .38em;
+  border-radius: 6px;
+}
+.content pre {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 14px 0;
+}
+.content pre code { background: none; padding: 0; font-size: .84em; }
+
+.content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 14px 0;
+  font-size: .93em;
+  display: block;
+  overflow-x: auto;
+}
+.content th, .content td {
+  border: 1px solid var(--border);
+  padding: 7px 10px;
+  text-align: left;
+}
+.content th { background: var(--card); font-weight: 650; }
+
+/* Ответ задачи — выделяем отдельно */
+.answer-box {
+  margin: 18px 0;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--ok) 12%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--ok) 40%, transparent);
+}
+.answer-box .answer-label {
+  font-size: 12px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--ok);
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+/* ---------------- Картинки структур (химия) ---------------- */
+.chem {
+  margin: 16px 0;
+  padding: 12px;
+  background: #fff;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  text-align: center;
+}
+.chem img { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+.chem figcaption {
+  color: #444;
+  font-size: 13.5px;
+  margin-top: 8px;
+  text-align: center;
+  line-height: 1.4;
+}
+
+/* ---------------- Формулы ---------------- */
+.math-block {
+  margin: 14px 0;
+  padding: 12px 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-align: center;
+}
+.katex { font-size: 1.06em; }
+.math-block .katex-display { margin: 0; }
+.math-block .katex-display > .katex { text-align: center; }
+.katex-error { color: var(--bad) !important; font-family: var(--mono); font-size: .9em; }
+
+/* Запасной режим (KaTeX не загрузился) */
+.plain .math-block { text-align: left; font-family: var(--mono); font-size: .92em; }
+
+/* ---------------- Плейсхолдеры формул до рендера ---------------- */
+.math-ph { color: var(--hint); font-family: var(--mono); font-size: .9em; }
+
+/* ---------------- Переключение «часть 1/2» ---------------- */
+.pager {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  padding: 20px var(--pad) 0;
+  max-width: 860px; margin: 0 auto;
+}
+.pager button {
+  flex: 1;
+  min-width: 120px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 11px 12px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.pager button.active {
+  background: var(--accent);
+  color: var(--accent-tx);
+  border-color: transparent;
+  font-weight: 650;
+}
+
+/* ---------------- Витрина демо ---------------- */
+.gallery-intro { color: var(--hint); font-size: 14px; margin-bottom: 14px; }
+.gcard {
+  display: block;
+  margin: 10px 0;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  background: var(--card);
+  border: 1px solid var(--border);
+  text-decoration: none;
+  color: var(--text);
+  transition: transform .08s ease;
+}
+.gcard:active { transform: scale(.98); }
+.gtitle { font-weight: 650; font-size: 15.5px; }
+.gsub { color: var(--hint); font-size: 13px; margin-top: 3px; }
+
+.foot {
+  text-align: center;
+  color: var(--hint);
+  font-size: 12px;
+  padding: 26px 16px 0;
+  opacity: .8;
+}
+
+/* ---------------- Режим «крупнее» ---------------- */
+body.big  { --fs: 19px; }
+body.huge { --fs: 21.5px; }
+
+@media (min-width: 700px) {
+  :root { --pad: 22px; }
+  .content { font-size: 1.02em; }
+}
