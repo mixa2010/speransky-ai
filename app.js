@@ -1,55 +1,64 @@
 /* ============================================================
-   Сперанский AI — Mini App (клиент)
+   Сперанский AI — Mini App v2: полноценный ИИ-клиент.
+   Чаты (история на сервере), выбор модели, диалог с красивым
+   рендером формул (KaTeX) и markdown.
 
-   Что делает:
-     1. Читает id решения из ссылки (?a=XXXX)
-     2. Запрашивает его у бэкенда (в бою — Render, где живёт бот)
-     3. Рендерит: LaTeX -> KaTeX, markdown -> HTML, химия -> <img>
-     4. Если KaTeX/marked не загрузились (CDN закрыт) — включает
-        запасной режим: текст с юникод-символами вместо \команд.
-
-   Никаких ключей API здесь нет и быть не должно: страница получает
-   только готовый текст ответа по одноразовому id.
+   Безопасность: страница не знает ключей API; каждый запрос к
+   Render несёт Telegram initData, подпись проверяется сервером.
    ============================================================ */
 'use strict';
 
-/* ---------- НАСТРОЙКА ПОД БОЕВОЙ РЕЖИМ ----------
-   ''  — тот же домен (демо-сервер отдаёт и страницу, и данные)
-   'https://homework-bot-6h3b.onrender.com' — реальный бот на Render
-*/
-const API_BASE = 'https://homework-bot-6h3b.onrender.com';
+const DEFAULT_API = 'https://homework-bot-6h3b.onrender.com';
+const _params = new URLSearchParams(location.search);
+const API_BASE = (_params.get('api') || DEFAULT_API).replace(/\/+$/, '');
+const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : null;
+const INIT_DATA = (tg && tg.initData) || _params.get('initData') || '';
 
-const $ = (sel) => document.querySelector(sel);
+const $ = (s) => document.querySelector(s);
 
-/* ================= Telegram Web App ================= */
-const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+const state = {
+  models: [],
+  chats: [],
+  current: null,          // {id, title, provider, model, messages: []}
+  busy: false,
+};
 
+/* ================= Telegram ================= */
 function tgInit() {
   if (!tg) return;
   try {
     tg.ready();
     tg.expand();
     if (tg.setHeaderColor) tg.setHeaderColor('bg_color');
-    if (tg.themeParams && Object.keys(tg.themeParams).length) {
-      document.documentElement.setAttribute('data-tg-theme', '1');
-    }
-    tg.onEvent('themeChanged', () => {
-      document.documentElement.setAttribute('data-tg-theme', '1');
-    });
-    // Свайп вниз не должен закрывать приложение, пока читаем решение
+    if (tg.disableVerticalSwapes) tg.disableVerticalSwapes();
     if (tg.disableVerticalSwipes) tg.disableVerticalSwipes();
-  } catch (e) { /* вне Telegram это нормально */ }
+  } catch (e) { /* вне Telegram */ }
 }
 
-function haptic(kind) {
-  try {
-    if (tg && tg.HapticFeedback) tg.HapticFeedback.impactOccurred(kind || 'light');
-  } catch (e) {}
+/* ================= сеть ================= */
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  const payload = body ? Object.assign({}, body) : {};
+  if (method !== 'GET' && method !== 'DELETE') payload.initData = INIT_DATA;
+  let url = API_BASE + path;
+  if (method === 'GET' || method === 'DELETE') {
+    url += (path.includes('?') ? '&' : '?') +
+           'initData=' + encodeURIComponent(INIT_DATA);
+  }
+  if (method !== 'GET') opts.body = JSON.stringify(payload);
+  const res = await fetch(url, opts);
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) {
+    throw Object.assign(new Error('unauthorized'), { code: 401 });
+  }
+  if (!res.ok) {
+    throw Object.assign(new Error(data.error || ('HTTP ' + res.status)),
+                        { code: res.status });
+  }
+  return data;
 }
 
-/* ================= Запасной режим: LaTeX -> текст =================
-   JS-порт strip_latex из bot.py. Используется ТОЛЬКО если KaTeX
-   не загрузился. Работает офлайн, без внешних ресурсов. */
+/* ================= рендер текста (из v1) ================= */
 const UNICODE_MAP = [
   [/\\iff\b/g, ' ⇔ '], [/\\Leftrightarrow\b/g, ' ⇔ '],
   [/\\Rightarrow\b/g, ' ⇒ '], [/\\implies\b/g, ' ⇒ '],
@@ -66,7 +75,6 @@ const UNICODE_MAP = [
   [/\\angle\b/g, '∠'], [/\\triangle\b/g, '△'],
   [/\\downarrow\b/g, '↓'], [/\\uparrow\b/g, '↑'],
 ];
-
 const GREEK = {
   alpha:'α', beta:'β', gamma:'γ', delta:'δ', epsilon:'ε', varepsilon:'ε',
   zeta:'ζ', eta:'η', theta:'θ', vartheta:'θ', iota:'ι', kappa:'κ',
@@ -78,7 +86,6 @@ const GREEK = {
   subseteq:'⊆', cup:'∪', cap:'∩', emptyset:'∅', forall:'∀', exists:'∃',
   circ:'°', degree:'°', ldots:'…', dots:'…', cdots:'⋯',
 };
-
 const DECOR = 'vec|hat|bar|dot|ddot|widetilde|widehat|overline|underline|' +
   'mathbf|mathrm|text|mathit|textbf|emph|operatorname|bm|boldsymbol';
 
@@ -88,11 +95,8 @@ function stripLatex(src) {
   for (const cmd of Object.keys(GREEK)) {
     t = t.replace(new RegExp('\\\\' + cmd + '\\b', 'g'), GREEK[cmd]);
   }
-  // \vec{X} -> X
   const decor = new RegExp('\\\\(?:' + DECOR + ')\\{([^{}]*)\\}', 'g');
   for (let i = 0; i < 3; i++) t = t.replace(decor, '$1');
-  // \frac{a}{b} -> a/b (со скобками, если внутри есть + или -)
-  // допускаем ОДИН уровень вложенных скобок: \frac{1}{2{,}5}
   const FRAC = /\\[d]?frac\{((?:[^{}]|\{[^{}]*\})+)\}\{((?:[^{}]|\{[^{}]*\})+)\}/g;
   for (let i = 0; i < 4; i++) {
     t = t.replace(FRAC, (m, a, b) =>
@@ -114,7 +118,6 @@ function stripLatex(src) {
   return t.replace(/[ \t]+$/gm, '').trim();
 }
 
-/* ================= Мини-markdown (если marked не загрузился) ================= */
 function esc(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
                   .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -124,7 +127,6 @@ function miniMarkdown(src) {
   const lines = String(src).split('\n');
   const out = [];
   let list = null, quote = [], code = null, para = [];
-
   const flushPara = () => {
     if (para.length) { out.push('<p>' + inline(para.join('\n')) + '</p>'); para = []; }
   };
@@ -135,10 +137,12 @@ function miniMarkdown(src) {
     }
   };
   const flushList = () => {
-    if (list) { out.push(`<${list.tag}>` + list.items.map(i => `<li>${inline(i)}</li>`).join('') + `</${list.tag}>`); list = null; }
+    if (list) {
+      out.push(`<${list.tag}>` + list.items.map(i => `<li>${inline(i)}</li>`).join('') + `</${list.tag}>`);
+      list = null;
+    }
   };
   const flushAll = () => { flushPara(); flushQuote(); flushList(); };
-
   function inline(s) {
     let r = esc(s);
     r = r.replace(/`([^`]+)`/g, '<code>$1</code>');
@@ -146,11 +150,9 @@ function miniMarkdown(src) {
     r = r.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     r = r.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
     r = r.replace(/_([^_\n]+)_/g, '<em>$1</em>');
-    r = r.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
     r = r.replace(/\n/g, '<br>');
     return r;
   }
-
   for (const raw of lines) {
     const line = raw.replace(/\s+$/, '');
     if (/^```/.test(line)) {
@@ -159,9 +161,7 @@ function miniMarkdown(src) {
       continue;
     }
     if (code !== null) { code.push(raw); continue; }
-
     if (!line.trim()) { flushAll(); continue; }
-
     let m;
     if ((m = line.match(/^(#{1,6})\s+(.*)$/))) {
       flushAll();
@@ -189,14 +189,7 @@ function miniMarkdown(src) {
   return out.join('\n');
 }
 
-/* ================= Математика: прячем, потом рендерим =================
-   Сначала вырезаем все формулы и кладем вместо них плейсхолдеры,
-   которые markdown НЕ тронет. Потом рендерим markdown. Потом
-   подменяем плейсхолдеры на настоящий KaTeX.
-   Без этого marked превращает \lambda в lambda и формула ломается. */
 const MATH_PREFIX = 'zzmathzz';
-const ENV_RE = /\\begin\{(equation\*?|align\*?|gather\*?|multline\*?|cases|array|matrix|pmatrix|bmatrix|system)\}[\s\S]*?\\end\{\1\}/g;
-
 function extractMath(text) {
   const store = [];
   const put = (tex, display) => {
@@ -204,15 +197,12 @@ function extractMath(text) {
     return `${MATH_PREFIX}${store.length - 1}zz`;
   };
   let t = String(text);
-
-  t = t.replace(ENV_RE, (m) => put(m, true));
+  t = t.replace(/\\begin\{(equation\*?|align\*?|gather\*?|cases|array|matrix|pmatrix|bmatrix)\}[\s\S]*?\\end\{\1\}/g,
+                (m) => put(m, true));
   t = t.replace(/\$\$([\s\S]+?)\$\$/g, (m, a) => put(a.trim(), true));
   t = t.replace(/\\\[([\s\S]+?)\\\]/g, (m, a) => put(a.trim(), true));
-  // inline: \(...\) — до $...$, чтобы не конфликтовало
   t = t.replace(/\\\(([\s\S]+?)\\\)/g, (m, a) => put(a.trim(), false));
-  // $...$ — не жадно, в пределах одной строки
   t = t.replace(/(^|[^\\$])\$([^$\n]+?)\$/g, (m, pre, a) => pre + put(a.trim(), false));
-
   return { text: t, store };
 }
 
@@ -221,504 +211,401 @@ function katexReady() {
          typeof window.katex.render === 'function';
 }
 
-function renderMathInto(root, store) {
-  const hasKatex = katexReady();
-  const re = new RegExp(MATH_PREFIX + '(\\d+)zz', 'g');
-
-  const textNodes = [];
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  let n;
-  while ((n = walker.nextNode())) textNodes.push(n);
-
-  for (const node of textNodes) {
-    if (!node.parentNode) continue;
-    re.lastIndex = 0;
-    if (!re.test(node.nodeValue)) continue;
-    re.lastIndex = 0;
-
-    const frag = document.createDocumentFragment();
-    let last = 0, m;
-    while ((m = re.exec(node.nodeValue))) {
-      if (m.index > last) {
-        frag.appendChild(document.createTextNode(node.nodeValue.slice(last, m.index)));
-      }
-      const item = store[parseInt(m[1], 10)];
-      if (item) frag.appendChild(buildMath(item, hasKatex));
-      last = m.index + m[0].length;
-    }
-    if (last < node.nodeValue.length) {
-      frag.appendChild(document.createTextNode(node.nodeValue.slice(last)));
-    }
-    node.parentNode.replaceChild(frag, node);
-    re.lastIndex = 0;
-  }
-}
-
 function buildMath(item, hasKatex) {
   if (!item) return document.createTextNode('');
-
-  // ---- блочная формула: всегда в карточке .math-block ----
   if (item.display) {
     const div = document.createElement('div');
     div.className = 'math-block';
     if (hasKatex) {
       const span = document.createElement('span');
       try {
-        window.katex.render(item.tex, span, {
-          displayMode: true,
-          throwOnError: false,
-          errorColor: '#ff6b6b',
-          strict: 'ignore',
-          trust: false,
-          output: 'htmlAndMathml',
-        });
+        window.katex.render(item.tex, span, { displayMode: true, throwOnError: false, strict: 'ignore' });
         div.appendChild(span);
         return div;
-      } catch (e) { /* падаем в текст */ }
+      } catch (e) { /* текст */ }
     }
     div.textContent = stripLatex(item.tex);
     return div;
   }
-
-  // ---- строчная формула ----
   if (hasKatex) {
     const span = document.createElement('span');
     try {
-      window.katex.render(item.tex, span, {
-        displayMode: false,
-        throwOnError: false,
-        errorColor: '#ff6b6b',
-        strict: 'ignore',
-        trust: false,
-        output: 'htmlAndMathml',
-      });
+      window.katex.render(item.tex, span, { displayMode: false, throwOnError: false, strict: 'ignore' });
       return span;
-    } catch (e) { /* падаем в текст */ }
+    } catch (e) { /* текст */ }
   }
   return document.createTextNode(stripLatex(item.tex));
 }
 
-/* Узкая карточка телефона vs длинная формула: если формула не влезает,
-   аккуратно уменьшаем её кегль (KaTeX целиком в em — масштабируется). */
-function fitMathBlocks(root) {
-  for (const div of root.querySelectorAll('.math-block')) {
-    div.style.fontSize = '';
-    const inner = div.querySelector('.katex-display') || div.firstElementChild;
-    if (!inner) continue;
-    const avail = div.clientWidth - 28;
-    const w = inner.scrollWidth;
-    if (avail > 40 && w > avail) {
-      const base = parseFloat(getComputedStyle(div).fontSize) || 17;
-      const ratio = Math.max(0.58, avail / w);
-      div.style.fontSize = (base * ratio).toFixed(2) + 'px';
-    }
-  }
-}
-
-let _fitTimer = null;
-function fitMathBlocksSoon(root) {
-  clearTimeout(_fitTimer);
-  _fitTimer = setTimeout(() => fitMathBlocks(root), 60);
-}
-
-/* Зачистка «сырых» LaTeX-команд, которые модель написала ПРЯМО в тексте
-   без $...$ (как в том ответе про векторы: \vec{FE}, \iff, \lambda).
-   Идет ПОСЛЕ рендера формул и трогает только обычный текст —
-   код, pre и уже отрендеренный KaTeX не задевает. */
-function scrubLatexLeftovers(root) {
+function renderMathInto(root, store) {
+  const hasKatex = katexReady();
+  const re = new RegExp(MATH_PREFIX + '(\\d+)zz', 'g');
   const nodes = [];
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   let n;
   while ((n = walker.nextNode())) nodes.push(n);
-  const re = /\\[a-zA-Z]/;
   for (const node of nodes) {
-    if (!node.nodeValue || !re.test(node.nodeValue)) continue;
+    if (!node.parentNode) continue;
+    re.lastIndex = 0;
+    if (!re.test(node.nodeValue)) continue;
+    re.lastIndex = 0;
+    const frag = document.createDocumentFragment();
+    let last = 0, m;
+    while ((m = re.exec(node.nodeValue))) {
+      if (m.index > last) frag.appendChild(document.createTextNode(node.nodeValue.slice(last, m.index)));
+      frag.appendChild(buildMath(store[parseInt(m[1], 10)], hasKatex));
+      last = m.index + m[0].length;
+    }
+    if (last < node.nodeValue.length) frag.appendChild(document.createTextNode(node.nodeValue.slice(last)));
+    node.parentNode.replaceChild(frag, node);
+  }
+}
+
+function scrubLatexLeftovers(root) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  let n;
+  while ((n = walker.nextNode())) nodes.push(n);
+  for (const node of nodes) {
+    if (!node.nodeValue || !/\\[a-zA-Z]/.test(node.nodeValue)) continue;
     const p = node.parentElement;
-    if (p && p.closest('pre, code, .katex, script, style')) continue;
+    if (p && p.closest('pre, code, .katex')) continue;
     const cleaned = stripLatex(node.nodeValue);
     if (cleaned !== node.nodeValue) node.nodeValue = cleaned;
   }
 }
 
-/* ================= Химические метки =================
-   В бою картинки рендерит бот (RDKit) и присылает готовые URL.
-   Здесь — страховка: если метка осталась в тексте, показываем её
-   читаемым текстом, а не мусором в квадратных скобках. */
-const CHEM_RE = /\[(RXN|SMILES|SCHEME):\s*([^\]|]+?)\s*(?:\|\s*([^\]|]+?))?\s*(?:\|\s*([^\]]+?))?\s*\]/gi;
-
-function extractChem(text) {
-  const imgs = [];
-  const t = String(text).replace(CHEM_RE, (m, kind, code, cond, names) => {
-    const caption = (cond || names || '').trim();
-    imgs.push({ code: code.trim(), caption, kind: kind.toUpperCase() });
-    // Запасной вариант (в бою метки заменяет сервер на готовые картинки):
-    // показываем уравнение читаемым кодовым блоком, а не мусором в скобках.
-    const lines = [`${kind.toUpperCase()}: ${code.trim()}`];
-    if (cond) lines.push(`условия: ${cond}`);
-    if (names) lines.push(`вещества: ${names}`);
-    return '\n```\n' + lines.join('\n') + '\n```\n';
-  });
-  return { text: t, imgs };
-}
-
-/* ================= Картинки: в карточку с подписью =================
-   Markdown-картинка ![подпись](img/x.png) превращается в
-   <figure class="chem"><img><figcaption>подпись</figcaption></figure>.
-   Если файл не загрузился — показываем подпись текстом, без битой иконки. */
-function styleImages(root) {
-  for (const img of Array.from(root.querySelectorAll('img'))) {
-    if (img.closest('.chem')) continue;
-    const fig = document.createElement('figure');
-    fig.className = 'chem';
-    img.replaceWith(fig);
-    fig.appendChild(img);
-    const alt = (img.getAttribute('alt') || '').trim();
-    img.loading = 'lazy';
-    // Подпись ВНУТРИ png рисует сам рендер бота (RDKit+Pillow),
-    // поэтому figcaption не дублируем. alt оставляем для доступности
-    // и как текст на случай, если картинка не загрузится.
-    img.addEventListener('error', () => {
-      const pre = document.createElement('pre');
-      pre.textContent = alt || '(структура недоступна)';
-      fig.replaceWith(pre);
-    });
-  }
-}
-
-/* Блочная формула не должна оставаться внутри <p> — выносим её наружу,
-   разрезая абзац на две части. Иначе вёрстка «плывёт». */
-function hoistBlocks(root) {
-  const blocks = Array.from(root.querySelectorAll('p > .math-block'));
-  for (const block of blocks) {
-    const p = block.parentNode;
-    const before = [], after = [];
-    let target = before, node = p.firstChild;
-    while (node) {
-      const next = node.nextSibling;
-      if (node === block) { target = after; }
-      else { target.push(node); }
-      node = next;
-    }
-    const frag = document.createDocumentFragment();
-    const mkP = (kids) => {
-      if (!kids.length) return null;
-      const np = document.createElement('p');
-      kids.forEach(k => np.appendChild(k));
-      return np;
-    };
-    const pb = mkP(before);
-    const pa = mkP(after);
-    if (pb) frag.appendChild(pb);
-    frag.appendChild(block);
-    if (pa) frag.appendChild(pa);
-    p.replaceWith(frag);
-  }
-}
-
-/* ================= Ответ задачи в рамочку ================= */
-function highlightAnswer(root) {
-  // ВАЖНО: \b в JS не понимает кириллицу, поэтому граница слова задана явно
-  const RE = /^(?:Ответ|ОТВЕТ|Итог|ИТОГ)(?:\s*[:.]|\s|$)/;
-  const nodes = Array.from(root.querySelectorAll('p, li'));
-  for (const el of nodes) {
-    if (el.closest('.answer-box')) continue;
-    const txt = (el.textContent || '').trim();
-    if (RE.test(txt) && txt.length < 400) {
-      const box = document.createElement('div');
-      box.className = 'answer-box';
-      const label = document.createElement('div');
-      label.className = 'answer-label';
-      label.textContent = 'Ответ';
-      box.appendChild(label);
-      const body = document.createElement('div');
-      // убираем само слово «Ответ:» из текста — оно теперь в подписи
-      el.innerHTML = el.innerHTML.replace(
-        /^\s*(<[^>]+>\s*)*(?:Ответ|ОТВЕТ|Итог|ИТОГ)\s*[:.]\s*/i, '$1');
-      while (el.firstChild) body.appendChild(el.firstChild);
-      // если сразу за строкой «Ответ:» идёт список ответов — тянем его в рамку
-      const absorb = [];
-      let nxt = el.nextElementSibling;
-      while (nxt && absorb.length < 2 &&
-             (nxt.tagName === 'UL' || nxt.tagName === 'OL')) {
-        absorb.push(nxt);
-        nxt = nxt.nextElementSibling;
-      }
-      box.appendChild(body);
-      el.replaceWith(box);
-      absorb.forEach(node => body.appendChild(node));
-    }
-  }
-}
-
-/* ================= Рендер целиком ================= */
-function renderInto(container, rawText, parts) {
-  container.innerHTML = '';
-  let text = String(rawText || '');
-
-  const chem = extractChem(text);
-  text = chem.text;
-
+function renderRich(container, text) {
   const math = extractMath(text);
-  text = math.text;
-
   let html;
   const hasMarked = typeof window.marked !== 'undefined' && window.marked;
   if (hasMarked) {
     try {
-      if (window.marked.setOptions) {
-        window.marked.setOptions({ breaks: true, gfm: true });
-      }
-      const parse = window.marked.parse || window.marked;
-      html = parse(text);
-    } catch (e) {
-      html = miniMarkdown(text);
-    }
+      if (window.marked.setOptions) window.marked.setOptions({ breaks: true, gfm: true });
+      html = (window.marked.parse || window.marked)(math.text);
+    } catch (e) { html = miniMarkdown(math.text); }
   } else {
-    html = miniMarkdown(text);
+    html = miniMarkdown(math.text);
   }
-
   container.innerHTML = html;
   renderMathInto(container, math.store);
   scrubLatexLeftovers(container);
-  hoistBlocks(container);
-  styleImages(container);
-  highlightAnswer(container);
-  fitMathBlocksSoon(container);
-  window.addEventListener('resize', () => fitMathBlocksSoon(container));
+  if (!hasMarked || !katexReady()) container.classList.add('plain');
+}
 
-  if (!hasMarked || !katexReady()) {
-    container.classList.add('plain');
-    const w = $('#warn');
-    const missing = [];
-    if (!katexReady()) missing.push('формулы (KaTeX)');
-    if (!hasMarked) missing.push('оформление (marked)');
-    w.hidden = false;
-    w.innerHTML = '⚠️ Не загрузился ' + missing.join(' и ') +
-      ' с CDN — показываю запасной вариант: всё читаемо, но формулы без красивого набора. ' +
-      'Проверь интернет или попробуй позже.';
+/* ================= UI helpers ================= */
+function warn(text) {
+  const w = $('#warn');
+  w.hidden = false;
+  w.textContent = text;
+  clearTimeout(warn._t);
+  warn._t = setTimeout(() => { w.hidden = true; }, 6000);
+}
+
+function showFatal(text) {
+  $('#boot').hidden = true;
+  $('#head').hidden = true;
+  $('#messages').hidden = true;
+  $('#empty').hidden = true;
+  $('#composer').hidden = true;
+  $('#fatal').hidden = false;
+  $('#fatal-text').textContent = text;
+}
+
+function shortModel(m) {
+  return (m || '').split('/').pop().split(':')[0];
+}
+
+function updateHead() {
+  $('#head-title').textContent = state.current ? state.current.title : 'Новый чат';
+  const chip = $('#btn-model');
+  chip.textContent = (state.current ? shortModel(state.current.model) : 'модель') + ' ▾';
+}
+
+function scrollBottom() {
+  const m = $('#messages');
+  requestAnimationFrame(() => { m.scrollTop = m.scrollHeight; });
+}
+
+function addMessageEl(role, text, opts = {}) {
+  const wrap = document.createElement('div');
+  wrap.className = 'msg ' + (role === 'user' ? 'user' : 'bot');
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble' + (opts.pending ? ' pending' : '');
+  if (role === 'user') {
+    bubble.textContent = text;
+  } else if (opts.pending) {
+    bubble.innerHTML = '<span class="dots"><i></i><i></i><i></i></span>';
   } else {
-    const w = $('#warn');
-    w.hidden = true;
-    w.innerHTML = '';
+    renderRich(bubble, text);
   }
+  wrap.appendChild(bubble);
+  $('#messages').appendChild(wrap);
+  scrollBottom();
+  return bubble;
 }
 
-/* ================= Данные ================= */
-async function fetchAnswerOnce(id) {
-  const base = API_BASE.replace(/\/+$/, '');
-  // БОЕВОЙ маршрут бота на Render: /a/<id> (демо-сервер отвечает там же).
-  const url = `${base}/a/${encodeURIComponent(id)}`;
-  const res = await fetch(url, { headers: { Accept: 'application/json' } });
-  if (res.status === 404) throw Object.assign(new Error('not found'), { code: 404 });
-  if (!res.ok) throw Object.assign(new Error('HTTP ' + res.status), { code: res.status });
-  const ct = (res.headers.get('Content-Type') || '');
-  if (!ct.includes('application/json')) {
-    // сервер ответил чем-то посторонним (например, «bot is alive»)
-    throw Object.assign(new Error('not json'), { code: 502 });
-  }
-  return res.json();
+function paintMessages() {
+  const box = $('#messages');
+  box.innerHTML = '';
+  const msgs = state.current ? state.current.messages : [];
+  $('#empty').hidden = msgs.length > 0;
+  box.hidden = false;
+  for (const m of msgs) addMessageEl(m.role, m.content);
 }
 
-/* Render на бесплатном тарифе может спать/перезапускаться: сетевая ошибка
-   или 5xx — не повод сдаваться, пробуем ещё раз с растущей паузой.
-   404 не ретраим: разбора действительно нет. */
-async function loadAnswer(id) {
-  const tries = 3;
-  let lastErr = null;
-  for (let i = 0; i < tries; i++) {
-    try {
-      return await fetchAnswerOnce(id);
-    } catch (e) {
-      lastErr = e;
-      if (e && e.code === 404) throw e;
-      if (i < tries - 1) {
-        const w = $('#warn');
-        w.hidden = false;
-        w.textContent = `⏳ Сервер с решениями не ответил (спит или перезапускается). Пробую ещё раз… (${i + 1}/${tries - 1})`;
-        await new Promise(r => setTimeout(r, 2500 * (i + 1)));
-      }
-    }
-  }
-  throw lastErr;
+/* ================= чаты и модели ================= */
+async function loadModels() {
+  const j = await api('GET', '/api/models');
+  state.models = j.models || [];
 }
 
-function metaChips(data) {
-  const head = $('#head-meta');
-  head.innerHTML = '';
-  const add = (cls, txt) => {
-    if (!txt) return;
-    const s = document.createElement('span');
-    s.className = 'chip' + (cls ? ' ' + cls : '');
-    s.textContent = txt;
-    head.appendChild(s);
+async function loadChats() {
+  const j = await api('GET', '/api/chats');
+  state.chats = j.chats || [];
+}
+
+function parseModel(str) {
+  const idx = String(str || '').indexOf('/');
+  if (idx < 0) return { provider: '', model: str || '' };
+  return { provider: str.slice(0, idx), model: str.slice(idx + 1) };
+}
+
+async function openChat(id) {
+  const row = await api('GET', `/api/chats/${id}`);
+  const pm = parseModel(row.model);
+  state.current = {
+    id: row.id, title: row.title || 'Чат',
+    provider: pm.provider, model: pm.model,
+    messages: row.messages || [],
   };
-  if (data.verdict === true)  add('ok', '✅ проверено консилиумом');
-  if (data.verdict === false) add('bad', '⚠️ консилиум нашёл расхождения');
-  if (data.model) add('', data.model);
-  if (data.mode)  add('', data.mode === 'fast' ? '⚡ быстрый режим' : '📚 режим Д/З');
-  if (data.subject) add('', data.subject);
-  if (data.images && data.images.length) add('', '🧪 структур: ' + data.images.length);
-  if (data.created) add('', data.created);
+  closeSheets();
+  updateHead();
+  paintMessages();
 }
 
-function setupPager(parts) {
-  const pager = $('#pager');
-  pager.innerHTML = '';
-  if (!parts || parts.length < 2) { pager.hidden = true; return; }
-  pager.hidden = false;
-  parts.forEach((p, i) => {
-    const b = document.createElement('button');
-    b.textContent = p.label || `Часть ${i + 1}`;
-    b.onclick = () => {
-      haptic('light');
-      Array.from(pager.children).forEach(c => c.classList.remove('active'));
-      b.classList.add('active');
-      renderInto($('#content'), p.text, parts);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    };
-    if (i === 0) b.classList.add('active');
-    pager.appendChild(b);
+async function createChat() {
+  const def = state.models.find(m => m.available) || state.models[0] || {};
+  const row = await api('POST', '/api/chats', {
+    title: 'Новый чат', model: `${def.provider || ''}/${def.model || ''}`,
   });
+  state.chats.unshift(row);
+  const pm = parseModel(row.model);
+  state.current = { id: row.id, title: row.title, provider: pm.provider,
+                    model: pm.model, messages: [] };
+  updateHead();
+  paintMessages();
 }
 
-function setupButtons(data) {
-  const btnFont = $('#btn-font');
-  const sizes = ['', 'big', 'huge'];
-  let si = 0;
-  btnFont.onclick = () => {
-    si = (si + 1) % sizes.length;
-    document.body.classList.remove('big', 'huge');
-    if (sizes[si]) document.body.classList.add(sizes[si]);
-    haptic('light');
-  };
-
-  const btnCopy = $('#btn-copy');
-  btnCopy.onclick = async () => {
-    const txt = (data.plain || $('#content').innerText || '').trim();
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(txt);
-      } else {
-        const ta = document.createElement('textarea');
-        ta.value = txt;
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        ta.remove();
-      }
-      btnCopy.textContent = '✓';
-      haptic('success');
-      setTimeout(() => { btnCopy.textContent = '📋'; }, 1400);
-    } catch (e) {
-      btnCopy.textContent = '✕';
-      setTimeout(() => { btnCopy.textContent = '📋'; }, 1400);
-    }
-  };
+async function deleteChat(id) {
+  await api('DELETE', `/api/chats/${id}`);
+  state.chats = state.chats.filter(c => c.id !== id);
+  if (state.current && state.current.id === id) {
+    state.current = null;
+    updateHead();
+    paintMessages();
+    $('#messages').hidden = true;
+    $('#empty').hidden = false;
+  }
+  renderChatsList();
 }
 
-/* Витрина демо-решений: удобно тыкать с телефона. */
-function showGallery(ids) {
-  $('#boot').hidden = true;
-  $('#fatal').hidden = true;
-  $('#view').hidden = false;
-  $('#head-title').textContent = 'Сперанский AI — демо решений';
-  $('#head-meta').innerHTML = '';
-  $('#pager').hidden = true;
-  const c = $('#content');
-  c.innerHTML = '';
-  const intro = document.createElement('p');
-  intro.className = 'gallery-intro';
-  intro.textContent = 'Это демо-витрина: выбери разбор, чтобы посмотреть, ' +
-    'как он выглядит в Mini App (формулы, структуры, вкладки).';
-  c.appendChild(intro);
-  for (const it of ids) {
-    const a = document.createElement('a');
-    a.className = 'gcard';
-    a.href = `?a=${encodeURIComponent(it.id)}`;
+function renderChatsList() {
+  const box = $('#chats-list');
+  box.innerHTML = '';
+  if (!state.chats.length) {
+    box.innerHTML = '<div class="sheet-empty">Чатов пока нет — нажми ✚ сверху.</div>';
+    return;
+  }
+  for (const c of state.chats) {
+    const row = document.createElement('div');
+    row.className = 'chat-row' + (state.current && state.current.id === c.id ? ' active' : '');
     const t = document.createElement('div');
-    t.className = 'gtitle';
-    t.textContent = it.title || it.id;
+    t.className = 'chat-row-title';
+    t.textContent = c.title || 'Чат';
     const s = document.createElement('div');
-    s.className = 'gsub';
-    s.textContent = (it.subject || '') + ' · открыть →';
-    a.appendChild(t);
-    a.appendChild(s);
-    c.appendChild(a);
-  }
-  setupButtons({ plain: '' });
-}
-
-function showFatal(text, canRetry) {
-  $('#boot').hidden = true;
-  $('#view').hidden = true;
-  const f = $('#fatal');
-  f.hidden = false;
-  if (text) $('#fatal-text').textContent = text;
-  const btn = document.getElementById('fatal-retry');
-  if (btn) {
-    btn.hidden = !canRetry;
-    btn.onclick = () => location.reload();
+    s.className = 'chat-row-sub';
+    s.textContent = shortModel(c.model) + ' · ' + String(c.updated_at || '').slice(5, 16);
+    const del = document.createElement('button');
+    del.className = 'icon-btn chat-del';
+    del.textContent = '✕';
+    del.onclick = (e) => {
+      e.stopPropagation();
+      if (del.dataset.arm) { deleteChat(c.id); }
+      else { del.dataset.arm = '1'; del.textContent = 'точно?'; del.classList.add('armed'); }
+    };
+    row.onclick = () => openChat(c.id);
+    row.appendChild(t); row.appendChild(s); row.appendChild(del);
+    box.appendChild(row);
   }
 }
 
-/* ================= Старт ================= */
+function renderModelsList() {
+  const box = $('#models-list');
+  box.innerHTML = '';
+  const sorted = state.models.slice().sort((a, b) => (b.available ? 1 : 0) - (a.available ? 1 : 0));
+  for (const m of sorted) {
+    const row = document.createElement('div');
+    row.className = 'model-row' +
+      (state.current && state.current.provider === m.provider &&
+       state.current.model === m.model ? ' active' : '');
+    const t = document.createElement('div');
+    t.className = 'model-row-title';
+    t.textContent = m.model + (m.vision ? ' 📷' : '');
+    const s = document.createElement('div');
+    s.className = 'model-row-sub';
+    s.textContent = m.provider + (m.available ? ' · доступна' : ' · отдыхает');
+    row.onclick = async () => {
+      if (state.current) {
+        state.current.provider = m.provider;
+        state.current.model = m.model;
+        updateHead();
+        try {
+          await api('PUT', `/api/chats/${state.current.id}`,
+                    { model: `${m.provider}/${m.model}` });
+        } catch (e) { /* не критично */ }
+      }
+      closeSheets();
+      renderModelsList();
+    };
+    row.appendChild(t); row.appendChild(s);
+    box.appendChild(row);
+  }
+}
+
+/* ================= оверлеи ================= */
+function openSheet(id) {
+  if (id === '#chats-sheet') renderChatsList();
+  if (id === '#model-sheet') renderModelsList();
+  $(id).hidden = false;
+}
+function closeSheets() {
+  $('#chats-sheet').hidden = true;
+  $('#model-sheet').hidden = true;
+}
+
+/* ================= отправка ================= */
+async function send() {
+  if (state.busy) return;
+  const input = $('#input');
+  const text = input.value.trim();
+  if (!text) return;
+  if (!INIT_DATA) return showFatal('Нет данных Telegram. Открой приложение из чата с ботом.');
+  try {
+    if (!state.current) await createChat();
+  } catch (e) {
+    return warn('Не удалось создать чат: ' + e.message);
+  }
+  const cur = state.current;
+  cur.messages.push({ role: 'user', content: text });
+  input.value = '';
+  autosize();
+  if (cur.title === 'Новый чат') {
+    cur.title = text.slice(0, 40) + (text.length > 40 ? '…' : '');
+    updateHead();
+  }
+  $('#empty').hidden = true;
+  $('#messages').hidden = false;
+  addMessageEl('user', text);
+  const pending = addMessageEl('assistant', '', { pending: true });
+  state.busy = true;
+  try {
+    const r = await api('POST', '/api/chat', {
+      provider: cur.provider, model: cur.model, messages: cur.messages,
+    });
+    pending.classList.remove('pending');
+    renderRich(pending, r.reply);
+    scrollBottom();
+    cur.messages.push({ role: 'assistant', content: r.reply });
+    try {
+      await api('PUT', `/api/chats/${cur.id}`,
+                { messages: cur.messages, title: cur.title,
+                  model: `${cur.provider}/${cur.model}` });
+      const row = state.chats.find(c => c.id === cur.id);
+      if (row) { row.title = cur.title; row.updated_at = new Date().toISOString(); }
+    } catch (e) { warn('Ответ получен, но не сохранился в историю: ' + e.message); }
+  } catch (e) {
+    pending.classList.remove('pending');
+    pending.textContent = '⚠️ ' + (e.code === 401
+      ? 'Сессия протухла: закрой и открой приложение заново.'
+      : 'Не получилось ответить: ' + e.message);
+    warn('Ошибка ответа: ' + e.message);
+  } finally {
+    state.busy = false;
+  }
+}
+
+function autosize() {
+  const i = $('#input');
+  i.style.height = 'auto';
+  i.style.height = Math.min(i.scrollHeight, 140) + 'px';
+}
+
+/* ================= старт ================= */
 async function boot() {
   tgInit();
-
-  const params = new URLSearchParams(location.search);
-  const id = params.get('a') || params.get('id') || params.get('startapp') || '';
-
-  if (!id) {
-    // Без id пробуем показать витрину доступных разборов (есть только
-    // в демо-сервере; в бою /api/ids не отвечает JSON-ом -> fatal-экран)
-    try {
-      const base = API_BASE.replace(/\/+$/, '');
-      const r = await fetch(`${base}/api/ids`, { headers: { Accept: 'application/json' } });
-      if (r.ok) {
-        const j = await r.json();
-        if (j && Array.isArray(j.ids) && j.ids.length) return showGallery(j.ids);
-      }
-    } catch (e) { /* нет витрины — покажем подсказку */ }
-    return showFatal('Открой эту страницу по ссылке из бота — в ней есть id решения.', false);
+  const retry = $('#fatal-retry');
+  if (retry) retry.onclick = () => location.reload();
+  if (!INIT_DATA) {
+    return showFatal('Открой меня из Telegram: в чате с ботом нажми кнопку ' +
+      'меню (квадратик слева от поля ввода) или кнопку «📱 Открыть приложение».');
   }
   try {
-    await render(id);
+    await Promise.all([loadModels(), loadChats()]);
   } catch (e) {
-    const is404 = !!(e && e.code === 404);
-    showFatal(is404
-      ? 'Такое решение не найдено или срок ссылки истёк.'
-      : 'Не удалось достучаться до сервера с решениями (Render). Обычно это ' +
-        'значит: сервис спал и просыпался, или на минуту пропала сеть. ' +
-        'Страница уже попробовала несколько раз — нажми «Повторить».',
-      !is404);
+    if (e.code === 401) {
+      return showFatal('Telegram не подтвердил сессию или тебя нет в списке ' +
+        'доступа. Открой приложение заново из чата с ботом.');
+    }
+    return showFatal('Не удалось связаться с ботом: ' + e.message +
+      '. Проверь интернет и попробуй ещё раз.');
   }
-}
-
-async function render(id) {
-  const data = await loadAnswer(id);
-  if (!data || !data.text) throw Object.assign(new Error('empty'), { code: 404 });
-
   $('#boot').hidden = true;
-  $('#fatal').hidden = true;
-  $('#view').hidden = false;
-
-  $('#head-title').textContent = data.title || 'Решение';
-  document.title = (data.title || 'Решение') + ' — Сперанский AI';
-  metaChips(data);
-
-  const parts = (data.parts && data.parts.length)
-    ? data.parts
-    : [{ label: 'Решение', text: data.text }];
-
-  setupPager(parts);
-  setupButtons(data);
-  renderInto($('#content'), parts[0].text, parts);
-
-  if (tg && tg.BackButton) {
+  $('#head').hidden = false;
+  $('#composer').hidden = false;
+  $('#messages').hidden = false;
+  $('#btn-chats').onclick = () => openSheet('#chats-sheet');
+  const wipe = $('#btn-wipe');
+  wipe.onclick = async () => {
+    if (!wipe.dataset.arm) {
+      wipe.dataset.arm = '1';
+      wipe.textContent = 'точно?';
+      wipe.classList.add('armed');
+      return;
+    }
+    wipe.dataset.arm = '';
+    wipe.textContent = '🗑';
+    wipe.classList.remove('armed');
     try {
-      tg.BackButton.onClick(() => tg.close());
-      if (parts.length > 1) tg.BackButton.show(); else tg.BackButton.hide();
-    } catch (e) {}
+      await api('DELETE', '/api/chats');
+      state.chats = [];
+      state.current = null;
+      updateHead();
+      paintMessages();
+      renderChatsList();
+      warn('Вся моя история удалена с сервера.');
+    } catch (e) {
+      warn('Не удалось удалить историю: ' + e.message);
+    }
+  };
+  $('#btn-model').onclick = () => openSheet('#model-sheet');
+  $('#btn-new').onclick = async () => {
+    try { await createChat(); } catch (e) { warn('Не удалось создать чат: ' + e.message); }
+  };
+  document.querySelectorAll('.sheet-back, .sheet-close').forEach(el => {
+    el.onclick = closeSheets;
+  });
+  $('#btn-send').onclick = send;
+  const input = $('#input');
+  input.addEventListener('input', autosize);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+  if (state.chats.length) {
+    try { await openChat(state.chats[0].id); } catch (e) { paintMessages(); }
+  } else {
+    updateHead();
+    paintMessages();
   }
 }
 
