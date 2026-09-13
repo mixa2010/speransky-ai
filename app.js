@@ -7,6 +7,7 @@
    Render несёт Telegram initData, подпись проверяется сервером.
    ============================================================ */
 'use strict';
+window.__APP_V = '20260915a';
 
 const DEFAULT_API = 'https://homework-bot-6h3b.onrender.com';
 const _params = new URLSearchParams(location.search);
@@ -614,6 +615,65 @@ function compressImage(file) {
   reader.readAsDataURL(file);
 }
 
+/* ================= стриминг ================= */
+async function readStream(res, bubble) {
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '', acc = '', last = 0, meta = null;
+  bubble.classList.remove('pending');
+  const paint = (force) => {
+    const now = Date.now();
+    if (!force && now - last < 120) return;
+    last = now;
+    renderRich(bubble, acc);
+    scrollBottom();
+  };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line) continue;
+      let j;
+      try { j = JSON.parse(line); } catch (e) { continue; }
+      if (j.d !== undefined) { acc += j.d; paint(false); }
+      else if (j.error) { throw Object.assign(new Error(j.error), { code: 502 }); }
+      else { meta = j; }
+    }
+  }
+  paint(true);
+  if (!meta) throw Object.assign(new Error('поток оборвался без мета-строки'),
+                                 { code: 502 });
+  meta.reply = meta.reply || acc;
+  return meta;
+}
+
+async function chatRequest(cur, bubble) {
+  const res = await fetch(API_BASE + '/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      initData: INIT_DATA, provider: cur.provider, model: cur.model,
+      messages: cur.messages, stream: true,
+    }),
+  });
+  const ct = res.headers.get('content-type') || '';
+  if (res.ok && ct.includes('ndjson')) {
+    return await readStream(res, bubble);
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw Object.assign(new Error(data.error || ('HTTP ' + res.status)),
+                        { code: res.status });
+  }
+  bubble.classList.remove('pending');
+  renderRich(bubble, data.reply);
+  return data;
+}
+
 /* ================= отправка ================= */
 async function send() {
   if (state.busy) return;
@@ -642,11 +702,7 @@ async function send() {
   const pending = addMessageEl('assistant', '', { pending: true });
   state.busy = true;
   try {
-    const r = await api('POST', '/api/chat', {
-      provider: cur.provider, model: cur.model, messages: cur.messages,
-    });
-    pending.classList.remove('pending');
-    renderRich(pending, r.reply);
+    const r = await chatRequest(cur, pending);
     const meta = document.createElement('div');
     meta.className = 'msg-meta';
     meta.innerHTML = logoHtml(r.provider) + ' ' + esc(r.model);
@@ -656,6 +712,17 @@ async function send() {
                                       pending.parentNode.firstChild);
     }
     scrollBottom();
+    if (r.fallbacks && r.fallbacks.length &&
+        (r.provider !== cur.provider || r.model !== cur.model)) {
+      const from = r.fallbacks[r.fallbacks.length - 1];
+      cur.provider = r.provider;
+      cur.model = r.model;
+      updateHead();
+      warn(`⚡ ${shortModel(from.model)}: ${FALL_REASON[from.code] || from.code} → ` +
+           `переключил на ${shortModel(r.model)}. Выбор обновлён.`);
+      api('GET', '/api/models').then((j) => { state.models = j.models || []; })
+        .catch(() => {});
+    }
     cur.messages.push({ role: 'assistant', content: r.reply,
                         provider: r.provider, model: r.model,
                         fallbacks: r.fallbacks || [] });
@@ -698,7 +765,13 @@ async function boot() {
       'меню (квадратик слева от поля ввода) или кнопку «📱 Открыть приложение».');
   }
   try {
-    await Promise.all([loadModels(), loadChats()]);
+    try {
+      const b = await api('GET', '/api/boot');
+      state.models = b.models || [];
+      state.chats = b.chats || [];
+    } catch (e) {
+      await Promise.all([loadModels(), loadChats()]);
+    }
   } catch (e) {
     if (e.code === 401) {
       return showFatal('Telegram не подтвердил сессию или тебя нет в списке ' +

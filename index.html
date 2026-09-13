@@ -6,6 +6,7 @@
 <meta name="theme-color" content="#0f1115">
 <title>Сперанский AI</title>
 
+<link rel="preconnect" href="https://homework-bot-6h3b.onrender.com" crossorigin>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
@@ -14,9 +15,9 @@
         crossorigin="anonymous"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"
         crossorigin="anonymous"></script>
-<script defer src="app.js?v=20260914b"></script>
+<script defer src="app.js?v=20260915a"></script>
 
-<link rel="stylesheet" href="style.css?v=20260914b">
+<link rel="stylesheet" href="style.css?v=20260915a">
 </head>
 <body>
 
@@ -90,5 +91,20 @@
   </div>
 </div>
 
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3a5f7027fa36625',t:'MTc4OTI5MDA2MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>
+window.__NEED_APP_V = '20260915a';
+window.addEventListener('load', function () {
+  if (window.__APP_V !== window.__NEED_APP_V) {
+    var k = 'bust-' + window.__NEED_APP_V;
+    if (!sessionStorage.getItem(k)) {
+      sessionStorage.setItem(k, '1');
+      var u = new URL(location.href);
+      u.searchParams.set('cb', Date.now());
+      location.replace(u.toString());
+    }
+  }
+});
+</script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
+</body>
 </html>
