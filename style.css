@@ -226,3 +226,4 @@ body { display: flex; flex-direction: column; }
 .msg-img { max-width: 240px; width: 100%; border-radius: 12px;
   display: block; margin: 0 0 6px; }
 .msg-img-ph { color: var(--hint); font-size: 12.5px; margin-bottom: 4px; }
+.math-plain { font-family: var(--mono); font-size: .92em; color: var(--text); }

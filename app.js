@@ -7,7 +7,7 @@
    Render несёт Telegram initData, подпись проверяется сервером.
    ============================================================ */
 'use strict';
-window.__APP_V = '20260915b';
+window.__APP_V = '20260915c';
 // iOS WKWebView не умеет стриминговое чтение fetch — там сразу просим целиком
 const NO_STREAM = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -308,6 +308,18 @@ function renderMathInto(root, store) {
   }
 }
 
+/* Если KaTeX не смог разобрать формулу (модель написала мусорный LaTeX),
+   не показываем красный error-блок: заменяем на читаемый плоский текст. */
+function healKatexErrors(root) {
+  root.querySelectorAll('.katex-error').forEach((el) => {
+    const tex = el.textContent || '';
+    const span = document.createElement('span');
+    span.className = 'math-plain';
+    span.textContent = stripLatex(tex).replace(/\*\*/g, '');
+    el.replaceWith(span);
+  });
+}
+
 function scrubLatexLeftovers(root) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const nodes = [];
@@ -336,6 +348,7 @@ function renderRich(container, text) {
   }
   container.innerHTML = html;
   renderMathInto(container, math.store);
+  healKatexErrors(container);
   scrubLatexLeftovers(container);
   if (!hasMarked || !katexReady()) container.classList.add('plain');
 }
