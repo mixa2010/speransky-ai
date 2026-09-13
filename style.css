@@ -197,3 +197,18 @@ body { display: flex; flex-direction: column; }
 
 .sheet-head-actions { display: flex; gap: 6px; }
 #btn-wipe.armed { color: #ff6b6b; border-color: #ff6b6b; }
+
+/* бейджи моделей и строка смены по лимиту */
+.msg.bot { flex-direction: column; align-items: flex-start; gap: 4px; }
+.msg-meta { display: flex; gap: 6px; align-items: center;
+            color: var(--hint); font-size: 11.5px; padding: 0 4px; }
+.msg-meta svg, .fall-chip svg, .plogo { width: 16px; height: 16px;
+  border-radius: 5px; vertical-align: -3px; object-fit: contain;
+  background: #fff; border: 1px solid var(--border); padding: 1px; }
+.fall-line { align-self: center; display: flex; flex-wrap: wrap; gap: 6px;
+             align-items: center; font-size: 11.5px; color: var(--hint);
+             background: var(--card); border: 1px dashed var(--border);
+             border-radius: 999px; padding: 4px 12px; margin: 2px 0 4px; }
+.fall-chip { display: inline-flex; gap: 5px; align-items: center; }
+.fall-chip.final { color: var(--text); font-weight: 600; }
+.fall-arrow { color: var(--hint); }
