@@ -214,3 +214,6 @@ body { display: flex; flex-direction: column; }
 .fall-arrow { color: var(--hint); }
 .model-row-title .plogo, .model-chip .plogo { width: 15px; height: 15px; }
 .model-chip { display: inline-flex; gap: 6px; align-items: center; }
+.model-row.dead { opacity: .5; }
+.model-row.unstable { opacity: .8; }
+.model-row.cooldown { opacity: .7; }

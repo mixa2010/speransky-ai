@@ -517,13 +517,22 @@ function renderChatsList() {
   }
 }
 
+const STATE_RANK = { ok: 0, new: 1, unstable: 2, cooldown: 3, dead: 4 };
+const STATE_RU = {
+  ok: '✅ доступна',
+  new: '🆕 новая, ещё не проверена',
+  unstable: '⚠️ нестабильна (были сбои)',
+  cooldown: '⏳ отдыхает после лимита',
+  dead: '❌ недоступна этому ключу',
+};
 function renderModelsList() {
   const box = $('#models-list');
   box.innerHTML = '';
-  const sorted = state.models.slice().sort((a, b) => (b.available ? 1 : 0) - (a.available ? 1 : 0));
+  const sorted = state.models.slice().sort((a, b) =>
+    (STATE_RANK[a.state] ?? 3) - (STATE_RANK[b.state] ?? 3));
   for (const m of sorted) {
     const row = document.createElement('div');
-    row.className = 'model-row' +
+    row.className = 'model-row ' + (m.state || 'ok') +
       (state.current && state.current.provider === m.provider &&
        state.current.model === m.model ? ' active' : '');
     const t = document.createElement('div');
@@ -532,7 +541,9 @@ function renderModelsList() {
       (m.vision ? ' 📷' : '');
     const s = document.createElement('div');
     s.className = 'model-row-sub';
-    s.textContent = m.provider + (m.available ? ' · доступна' : ' · отдыхает');
+    s.textContent = m.provider + ' · ' + (STATE_RU[m.state] || '✅ доступна') +
+      (typeof m.health === 'number' && m.state !== 'new'
+        ? ` · здоровье ${Math.round(m.health * 100)}%` : '');
     row.onclick = async () => {
       if (state.current) {
         state.current.provider = m.provider;
