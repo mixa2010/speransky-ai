@@ -7,7 +7,7 @@
    Render несёт Telegram initData, подпись проверяется сервером.
    ============================================================ */
 'use strict';
-window.__APP_V = '20260915c';
+window.__APP_V = '20260916a';
 // iOS WKWebView не умеет стриминговое чтение fetch — там сразу просим целиком
 const NO_STREAM = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -64,6 +64,8 @@ const FALL_REASON = {
 
 const state = {
   pendingImage: null,
+  abortCtl: null,
+  thinkTimer: null,
   models: [],
   chats: [],
   current: null,          // {id, title, provider, model, messages: []}
@@ -574,6 +576,7 @@ function renderModelsList() {
       (typeof m.health === 'number' && m.state !== 'new'
         ? ` · здоровье ${Math.round(m.health * 100)}%` : '');
     row.onclick = async () => {
+      hapticSel();
       if (state.current) {
         state.current.provider = m.provider;
         state.current.model = m.model;
@@ -600,6 +603,33 @@ function openSheet(id) {
 function closeSheets() {
   $('#chats-sheet').hidden = true;
   $('#model-sheet').hidden = true;
+}
+
+/* ================= «думает» с таймером и микрокопи ================= */
+const THINK_PHRASES = ['читаю условие…', 'строю решение…', 'сверяю вычисления…',
+                       'формулирую шаги…', 'думаю дальше…'];
+function startThinking(bubble) {
+  bubble.innerHTML = '<div class="think"><span class="dots"><i></i><i></i><i></i></span>' +
+    '<span class="think-txt">' + THINK_PHRASES[0] + ' <b class="think-s">0с</b></span></div>';
+  const t0 = Date.now();
+  let pi = 0;
+  state.thinkTimer = setInterval(() => {
+    const sec = Math.round((Date.now() - t0) / 1000);
+    const el = bubble.querySelector('.think-s');
+    if (el) el.textContent = sec + 'с';
+    if (sec % 5 === 0 && sec > 0) {
+      pi = (pi + 1) % THINK_PHRASES.length;
+      const tx = bubble.querySelector('.think-txt');
+      if (tx) tx.firstChild.textContent = THINK_PHRASES[pi] + ' ';
+    }
+    if (sec === 25) {
+      const tx = bubble.querySelector('.think-txt');
+      if (tx) tx.firstChild.textContent = 'ответ длинный, всё ещё думаю… ';
+    }
+  }, 1000);
+}
+function stopThinking() {
+  if (state.thinkTimer) { clearInterval(state.thinkTimer); state.thinkTimer = null; }
 }
 
 /* ================= фото задания ================= */
@@ -631,12 +661,34 @@ function compressImage(file) {
   reader.readAsDataURL(file);
 }
 
+/* ================= хаптики Telegram ================= */
+function haptic(kind) {
+  try { if (tg && tg.HapticFeedback) tg.HapticFeedback.impactOccurred(kind || 'light'); } catch (e) {}
+}
+function hapticSel() {
+  try { if (tg && tg.HapticFeedback) tg.HapticFeedback.selectionChanged(); } catch (e) {}
+}
+function hapticNotify(type) {
+  try { if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred(type); } catch (e) {}
+}
+
 /* ================= стриминг ================= */
 async function readStream(res, bubble) {
   const reader = res.body.getReader();
+  try {
+    return await _readStreamInner(res, reader, bubble);
+  } catch (e) {
+    bubble.classList.remove('streaming');
+    if (e && e.name === 'AbortError') { e.aborted = true; e.partial = bubble.__acc || ''; }
+    throw e;
+  }
+}
+
+async function _readStreamInner(res, reader, bubble) {
   const dec = new TextDecoder();
   let buf = '', acc = '', last = 0, meta = null;
   bubble.classList.remove('pending');
+  bubble.classList.add('streaming');
   const paint = (force) => {
     const now = Date.now();
     if (!force && now - last < 120) return;
@@ -655,11 +707,12 @@ async function readStream(res, bubble) {
       if (!line) continue;
       let j;
       try { j = JSON.parse(line); } catch (e) { continue; }
-      if (j.d !== undefined) { acc += j.d; paint(false); }
+      if (j.d !== undefined) { acc += j.d; bubble.__acc = acc; paint(false); }
       else if (j.error) { throw Object.assign(new Error(j.error), { code: 502 }); }
       else { meta = j; }
     }
   }
+  bubble.classList.remove('streaming');
   paint(true);
   if (!meta) throw Object.assign(new Error('поток оборвался без мета-строки'),
                                  { code: 502 });
@@ -668,14 +721,26 @@ async function readStream(res, bubble) {
 }
 
 async function chatRequest(cur, bubble) {
-  const res = await fetch(API_BASE + '/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      initData: INIT_DATA, provider: cur.provider, model: cur.model,
-      messages: cur.messages, stream: !NO_STREAM,
-    }),
-  });
+  state.abortCtl = new AbortController();
+  let timedOut = false;
+  const silence = setTimeout(() => { timedOut = true; state.abortCtl.abort(); }, 90000);
+  let res;
+  try {
+    res = await fetch(API_BASE + '/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: state.abortCtl.signal,
+      body: JSON.stringify({
+        initData: INIT_DATA, provider: cur.provider, model: cur.model,
+        messages: cur.messages, stream: !NO_STREAM,
+      }),
+    });
+  } catch (e) {
+    clearTimeout(silence);
+    if (timedOut) throw Object.assign(new Error('сервер молчит >90 секунд'), { code: 504 });
+    throw e;
+  }
+  clearTimeout(silence);
   const ct = res.headers.get('content-type') || '';
   if (res.ok && ct.includes('ndjson')) {
     try {
@@ -723,9 +788,20 @@ async function send() {
   $('#messages').hidden = false;
   addMessageEl('user', text, { image: img });
   const pending = addMessageEl('assistant', '', { pending: true });
+  startThinking(pending);
   state.busy = true;
+  setSendUI(true);
+  haptic('light');
   try {
-    const r = await chatRequest(cur, pending);
+    let r;
+    try {
+      r = await chatRequest(cur, pending);
+    } catch (e) {
+      if (e.name === 'AbortError') { e.aborted = true; e.partial = pending.__acc || ''; }
+      if (e.code === 504) e.timedOut504 = true;
+      throw e;
+    }
+    stopThinking();
     const meta = document.createElement('div');
     meta.className = 'msg-meta';
     meta.innerHTML = logoHtml(r.provider) + ' ' + esc(r.model);
@@ -762,14 +838,45 @@ async function send() {
       if (row) { row.title = cur.title; row.updated_at = new Date().toISOString(); }
     } catch (e) { warn('Ответ получен, но не сохранился в историю: ' + e.message); }
   } catch (e) {
-    pending.classList.remove('pending');
+    stopThinking();
+    pending.classList.remove('pending', 'streaming');
+    if (e.aborted && !e.timedOut504) {
+      const part = e.partial || '';
+      if (part) {
+        renderRich(pending, part);
+        const note = document.createElement('div');
+        note.className = 'stop-note';
+        note.textContent = '■ остановлено — сохранил сгенерированную часть';
+        pending.appendChild(note);
+        cur.messages.push({ role: 'assistant', content: part });
+        warn('Генерацию остановили: сохранил то, что успело напечататься.');
+      } else {
+        pending.remove();
+        warn('Генерацию остановили.');
+      }
+      return;
+    }
+    hapticNotify('error');
     pending.textContent = '⚠️ ' + (e.code === 401
       ? 'Сессия протухла: закрой и открой приложение заново.'
-      : 'Не получилось ответить: ' + e.message);
+      : e.code === 504
+        ? 'Сервер молчит больше 90 секунд. Попробуй ещё раз или проверь интернет.'
+        : 'Не получилось ответить: ' + e.message);
     warn('Ошибка ответа: ' + e.message);
   } finally {
+    stopThinking();
     state.busy = false;
+    setSendUI(false);
+    state.abortCtl = null;
   }
+}
+
+function setSendUI(busy) {
+  const b = $('#btn-send');
+  const ico = $('#send-ico');
+  b.classList.toggle('stopping', !!busy);
+  if (ico) ico.textContent = busy ? '■' : '➤';
+  b.setAttribute('aria-label', busy ? 'остановить генерацию' : 'отправить');
 }
 
 function autosize() {
@@ -838,7 +945,14 @@ async function boot() {
   document.querySelectorAll('.sheet-back, .sheet-close').forEach(el => {
     el.onclick = closeSheets;
   });
-  $('#btn-send').onclick = send;
+  $('#btn-send').onclick = () => {
+    if (state.busy) {
+      haptic('light');
+      if (state.abortCtl) state.abortCtl.abort();
+    } else {
+      send();
+    }
+  };
   const fileInput = $('#file-input');
   $('#btn-attach').onclick = () => fileInput.click();
   $('#attach-remove').onclick = () => clearAttach();
