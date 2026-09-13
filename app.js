@@ -7,7 +7,10 @@
    Render несёт Telegram initData, подпись проверяется сервером.
    ============================================================ */
 'use strict';
-window.__APP_V = '20260915a';
+window.__APP_V = '20260915b';
+// iOS WKWebView не умеет стриминговое чтение fetch — там сразу просим целиком
+const NO_STREAM = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 const DEFAULT_API = 'https://homework-bot-6h3b.onrender.com';
 const _params = new URLSearchParams(location.search);
@@ -657,12 +660,19 @@ async function chatRequest(cur, bubble) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       initData: INIT_DATA, provider: cur.provider, model: cur.model,
-      messages: cur.messages, stream: true,
+      messages: cur.messages, stream: !NO_STREAM,
     }),
   });
   const ct = res.headers.get('content-type') || '';
   if (res.ok && ct.includes('ndjson')) {
-    return await readStream(res, bubble);
+    try {
+      return await readStream(res, bubble);
+    } catch (e) {
+      // стрим умер посередине (особенность некоторых вебвью): повторяем
+      // запрос целиком — надёжность важнее экономии одного запроса
+      bubble.classList.add('pending');
+      bubble.innerHTML = '<span class="dots"><i></i><i></i><i></i></span>';
+    }
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
