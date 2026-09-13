@@ -361,7 +361,12 @@ function shortModel(m) {
 function updateHead() {
   $('#head-title').textContent = state.current ? state.current.title : 'Новый чат';
   const chip = $('#btn-model');
-  chip.textContent = (state.current ? shortModel(state.current.model) : 'модель') + ' ▾';
+  if (state.current && state.current.provider) {
+    chip.innerHTML = logoHtml(state.current.provider) + ' ' +
+      esc(shortModel(state.current.model)) + ' ▾';
+  } else {
+    chip.innerHTML = logoSvg('') + ' модель ▾';
+  }
 }
 
 function scrollBottom() {
@@ -523,7 +528,8 @@ function renderModelsList() {
        state.current.model === m.model ? ' active' : '');
     const t = document.createElement('div');
     t.className = 'model-row-title';
-    t.textContent = m.model + (m.vision ? ' 📷' : '');
+    t.innerHTML = logoHtml(m.provider) + ' ' + esc(m.model) +
+      (m.vision ? ' 📷' : '');
     const s = document.createElement('div');
     s.className = 'model-row-sub';
     s.textContent = m.provider + (m.available ? ' · доступна' : ' · отдыхает');

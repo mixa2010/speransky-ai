@@ -212,3 +212,5 @@ body { display: flex; flex-direction: column; }
 .fall-chip { display: inline-flex; gap: 5px; align-items: center; }
 .fall-chip.final { color: var(--text); font-weight: 600; }
 .fall-arrow { color: var(--hint); }
+.model-row-title .plogo, .model-chip .plogo { width: 15px; height: 15px; }
+.model-chip { display: inline-flex; gap: 6px; align-items: center; }
