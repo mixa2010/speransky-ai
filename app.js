@@ -59,6 +59,7 @@ const FALL_REASON = {
 };
 
 const state = {
+  pendingImage: null,
   models: [],
   chats: [],
   current: null,          // {id, title, provider, model, messages: []}
@@ -404,7 +405,18 @@ function addMessageEl(role, text, opts = {}) {
   const bubble = document.createElement('div');
   bubble.className = 'bubble' + (opts.pending ? ' pending' : '');
   if (role === 'user') {
-    bubble.textContent = text;
+    if (opts.image) {
+      const im = document.createElement('img');
+      im.className = 'msg-img';
+      im.src = opts.image;
+      bubble.appendChild(im);
+    } else if (opts.hasImage) {
+      const ph = document.createElement('div');
+      ph.className = 'msg-img-ph';
+      ph.textContent = '📷 фото прикреплялось (в истории не хранится)';
+      bubble.appendChild(ph);
+    }
+    if (text) bubble.appendChild(document.createTextNode(text));
   } else if (opts.pending) {
     bubble.innerHTML = '<span class="dots"><i></i><i></i><i></i></span>';
   } else {
@@ -573,6 +585,35 @@ function closeSheets() {
   $('#model-sheet').hidden = true;
 }
 
+/* ================= фото задания ================= */
+function clearAttach() {
+  state.pendingImage = null;
+  $('#attach-preview').hidden = true;
+}
+
+function compressImage(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 1280;
+      let w = img.width, h = img.height;
+      const k = Math.min(1, MAX / Math.max(w, h));
+      w = Math.round(w * k); h = Math.round(h * k);
+      const cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      cv.getContext('2d').drawImage(img, 0, 0, w, h);
+      state.pendingImage = cv.toDataURL('image/jpeg', 0.82);
+      $('#attach-thumb').src = state.pendingImage;
+      $('#attach-preview').hidden = false;
+    };
+    img.onerror = () => warn('Не удалось прочитать картинку.');
+    img.src = reader.result;
+  };
+  reader.onerror = () => warn('Не удалось открыть файл.');
+  reader.readAsDataURL(file);
+}
+
 /* ================= отправка ================= */
 async function send() {
   if (state.busy) return;
@@ -586,7 +627,9 @@ async function send() {
     return warn('Не удалось создать чат: ' + e.message);
   }
   const cur = state.current;
-  cur.messages.push({ role: 'user', content: text });
+  const img = state.pendingImage;
+  cur.messages.push({ role: 'user', content: text, image: img || undefined });
+  clearAttach();
   input.value = '';
   autosize();
   if (cur.title === 'Новый чат') {
@@ -595,7 +638,7 @@ async function send() {
   }
   $('#empty').hidden = true;
   $('#messages').hidden = false;
-  addMessageEl('user', text);
+  addMessageEl('user', text, { image: img });
   const pending = addMessageEl('assistant', '', { pending: true });
   state.busy = true;
   try {
@@ -616,9 +659,14 @@ async function send() {
     cur.messages.push({ role: 'assistant', content: r.reply,
                         provider: r.provider, model: r.model,
                         fallbacks: r.fallbacks || [] });
+    // на сервер история уходит без base64: только метка 📷
+    const clean = cur.messages.map((m) => {
+      if (m.image) { const c = { ...m }; delete c.image; c.hasImage = true; return c; }
+      return m;
+    });
     try {
       await api('PUT', `/api/chats/${cur.id}`,
-                { messages: cur.messages, title: cur.title,
+                { messages: clean, title: cur.title,
                   model: `${cur.provider}/${cur.model}` });
       const row = state.chats.find(c => c.id === cur.id);
       if (row) { row.title = cur.title; row.updated_at = new Date().toISOString(); }
@@ -695,6 +743,14 @@ async function boot() {
     el.onclick = closeSheets;
   });
   $('#btn-send').onclick = send;
+  const fileInput = $('#file-input');
+  $('#btn-attach').onclick = () => fileInput.click();
+  $('#attach-remove').onclick = () => clearAttach();
+  fileInput.addEventListener('change', () => {
+    const f = fileInput.files && fileInput.files[0];
+    fileInput.value = '';
+    if (f) compressImage(f);
+  });
   const input = $('#input');
   input.addEventListener('input', autosize);
   input.addEventListener('keydown', (e) => {

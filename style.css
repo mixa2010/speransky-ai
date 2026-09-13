@@ -217,3 +217,12 @@ body { display: flex; flex-direction: column; }
 .model-row.dead { opacity: .5; }
 .model-row.unstable { opacity: .8; }
 .model-row.cooldown { opacity: .7; }
+.attach-btn { font-size: 17px; padding: 8px 10px; }
+.attach-preview { position: sticky; bottom: 64px; z-index: 25;
+  display: flex; gap: 8px; align-items: center;
+  max-width: 860px; margin: 0 auto; padding: 6px 12px; }
+.attach-preview img { width: 72px; height: 72px; object-fit: cover;
+  border-radius: 12px; border: 1px solid var(--border); }
+.msg-img { max-width: 240px; width: 100%; border-radius: 12px;
+  display: block; margin: 0 0 6px; }
+.msg-img-ph { color: var(--hint); font-size: 12.5px; margin-bottom: 4px; }

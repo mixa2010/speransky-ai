@@ -51,7 +51,14 @@
      Модель можно сменить кнопкой сверху.</p>
 </div>
 
+<div id="attach-preview" class="attach-preview" hidden>
+  <img id="attach-thumb" alt="">
+  <button id="attach-remove" class="icon-btn" title="Убрать фото">✕</button>
+</div>
+
 <footer id="composer" class="composer" hidden>
+  <button id="btn-attach" class="icon-btn attach-btn" title="Фото задания">📎</button>
+  <input id="file-input" type="file" accept="image/*" hidden>
   <textarea id="input" rows="1" placeholder="Сообщение…"></textarea>
   <button id="btn-send" class="send-btn" title="Отправить">➤</button>
 </footer>
@@ -83,5 +90,5 @@
   </div>
 </div>
 
-</body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3a5f7027fa36625',t:'MTc4OTI5MDA2MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
