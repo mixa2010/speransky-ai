@@ -7,7 +7,7 @@
    Render несёт Telegram initData, подпись проверяется сервером.
    ============================================================ */
 'use strict';
-window.__APP_V = '20260916a';
+window.__APP_V = '20260916b';
 // iOS WKWebView не умеет стриминговое чтение fetch — там сразу просим целиком
 const NO_STREAM = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -380,6 +380,12 @@ function shortModel(m) {
 
 function updateHead() {
   $('#head-title').textContent = state.current ? state.current.title : 'Новый чат';
+  const inp = $('#input');
+  if (inp) {
+    inp.placeholder = state.current
+      ? 'Сообщение…'
+      : 'Сообщение… чат создастся сам';
+  }
   const chip = $('#btn-model');
   if (state.current && state.current.provider) {
     chip.innerHTML = logoHtml(state.current.provider) + ' ' +
@@ -458,6 +464,21 @@ function paintMessages() {
   box.innerHTML = '';
   const msgs = state.current ? state.current.messages : [];
   $('#empty').hidden = msgs.length > 0;
+  const cta = $('#btn-start-cta');
+  const et = $('#empty-title');
+  const ex = $('#empty-text');
+  if (cta) cta.hidden = !!state.current;
+  if (et && ex && msgs.length === 0) {
+    if (state.current) {
+      et.textContent = 'Чат готов';
+      ex.innerHTML = 'Модель ' + esc(shortModel(state.current.model)) +
+        ' на связи. Напиши первый вопрос или прикрепи фото.';
+    } else {
+      et.textContent = 'Начнём?';
+      ex.innerHTML = 'Выбери модель — чат создастся сразу.<br>' +
+        'Или просто напиши вопрос / прикрепи фото скрепкой.';
+    }
+  }
   box.hidden = false;
   for (const m of msgs) addMessageEl(m.role, m.content, m);
 }
@@ -556,6 +577,15 @@ const STATE_RU = {
   cooldown: '⏳ отдыхает после лимита',
   dead: '❌ недоступна этому ключу',
 };
+async function ensureChatWith(provider, model) {
+  const row = await api('POST', '/api/chats',
+                        { title: 'Новый чат', model: `${provider}/${model}` });
+  state.chats.unshift(row);
+  state.current = { id: row.id, title: row.title, provider, model, messages: [] };
+  updateHead();
+  paintMessages();
+}
+
 function renderModelsList() {
   const box = $('#models-list');
   box.innerHTML = '';
@@ -585,6 +615,14 @@ function renderModelsList() {
           await api('PUT', `/api/chats/${state.current.id}`,
                     { model: `${m.provider}/${m.model}` });
         } catch (e) { /* не критично */ }
+      } else {
+        // чата ещё нет: выбор модели сам создаёт чат
+        try {
+          await ensureChatWith(m.provider, m.model);
+          warn(`Чат создан с моделью ${shortModel(m.model)}.`);
+        } catch (e) {
+          warn('Не удалось создать чат: ' + e.message);
+        }
       }
       closeSheets();
       renderModelsList();
@@ -945,6 +983,8 @@ async function boot() {
   document.querySelectorAll('.sheet-back, .sheet-close').forEach(el => {
     el.onclick = closeSheets;
   });
+  const cta = $('#btn-start-cta');
+  if (cta) cta.onclick = () => { haptic('light'); openSheet('#model-sheet'); };
   $('#btn-send').onclick = () => {
     if (state.busy) {
       haptic('light');

@@ -368,3 +368,12 @@ body { display: flex; flex-direction: column; }
   .messages { padding: 20px 18px 14px; }
 }
 .msg.user .msg-img-ph { color: rgba(255,255,255,.82); }
+.cta-btn {
+  margin-top: 14px; border: 0; cursor: pointer;
+  padding: 12px 22px; border-radius: 999px; font-size: 15px; font-weight: 650;
+  color: var(--accent-tx);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 35%, transparent);
+  transition: transform .18s var(--ease);
+}
+.cta-btn:active { transform: scale(.95); }

@@ -15,7 +15,7 @@
         crossorigin="anonymous"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"
         crossorigin="anonymous"></script>
-<script defer src="app.js?v=20260916a"></script>
+<script defer src="app.js?v=20260916b"></script>
 
 <link rel="stylesheet" href="style.css?v=20260915a">
 </head>
@@ -52,9 +52,10 @@
   <svg class="empty-spark" viewBox="0 0 24 24" aria-hidden="true">
     <path d="M12 1l2.6 8.4L23 12l-8.4 2.6L12 23l-2.6-8.4L1 12l8.4-2.6z"/>
   </svg>
-  <h2>Начнём?</h2>
-  <p>Напиши вопрос или прикрепи фото задания скрепкой.<br>
-     Модель меняется кнопкой сверху.</p>
+  <h2 id="empty-title">Начнём?</h2>
+  <p id="empty-text">Выбери модель — чат создастся сразу.<br>
+     Или просто напиши вопрос / прикрепи фото скрепкой.</p>
+  <button id="btn-start-cta" class="cta-btn">✨ Выбрать модель и начать</button>
 </div>
 
 <div id="attach-preview" class="attach-preview" hidden>
@@ -97,7 +98,7 @@
 </div>
 
 <script>
-window.__NEED_APP_V = '20260916a';
+window.__NEED_APP_V = '20260916b';
 window.addEventListener('load', function () {
   if (window.__APP_V !== window.__NEED_APP_V) {
     var k = 'bust-' + window.__NEED_APP_V;
@@ -110,5 +111,5 @@ window.addEventListener('load', function () {
   }
 });
 </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3a79a3aaa9cb8ed',t:'MTc4OTMwNzIzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</body>
 </html>
