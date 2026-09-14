@@ -377,3 +377,23 @@ body { display: flex; flex-direction: column; }
   transition: transform .18s var(--ease);
 }
 .cta-btn:active { transform: scale(.95); }
+
+/* категории моделей */
+.cat-head { display: flex; gap: 8px; align-items: center;
+  color: var(--hint); font-size: 12px; font-weight: 700;
+  letter-spacing: .06em; text-transform: uppercase;
+  margin: 14px 4px 8px; }
+.cat-head svg { opacity: .8; }
+.cat-head .soon-badge { margin-left: auto; display: inline-flex; gap: 4px;
+  align-items: center; color: var(--hint); font-weight: 600;
+  border: 1px solid var(--hair); border-radius: 999px; padding: 2px 9px;
+  font-size: 10.5px; letter-spacing: .04em; }
+.soon-row { color: var(--hint); font-size: 12.5px; padding: 4px 6px 8px; }
+.vis-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+.icon-btn svg { vertical-align: -3px; }
+.attach-btn.rec { color: #ff5c5c; border-color: #ff5c5c;
+  animation: rec-pulse 1.2s ease-in-out infinite; }
+@keyframes rec-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,92,92,.35); }
+  50% { box-shadow: 0 0 0 8px rgba(255,92,92,0); } }
+#send-ico { display: inline-flex; }

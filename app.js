@@ -7,7 +7,7 @@
    Render несёт Telegram initData, подпись проверяется сервером.
    ============================================================ */
 'use strict';
-window.__APP_V = '20260916b';
+window.__APP_V = '20260917a';
 // iOS WKWebView не умеет стриминговое чтение fetch — там сразу просим целиком
 const NO_STREAM = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -586,11 +586,83 @@ async function ensureChatWith(provider, model) {
   paintMessages();
 }
 
+const CATS = [
+  { id: 'text', title: 'Текстовые и задачи', icon: 'catText' },
+  { id: 'code', title: 'Коддинг', icon: 'catCode',
+    filter: /code|coder|codestral|leanstral|coder480b/i },
+  { id: 'image', title: 'Генерация изображений', icon: 'catImage', soon: true },
+  { id: 'video', title: 'Генерация видео', icon: 'catVideo', soon: true },
+  { id: 'audio', title: 'Аудио и озвучка', icon: 'catAudio', soon: true },
+];
+
+function modelRow(m) {
+  const row = document.createElement('div');
+  row.className = 'model-row ' + (m.state || 'ok') +
+    (state.current && state.current.provider === m.provider &&
+     state.current.model === m.model ? ' active' : '');
+  const t = document.createElement('div');
+  t.className = 'model-row-title';
+  t.innerHTML = logoHtml(m.provider) + ' ' + esc(m.model) +
+    (m.vision ? ' <span class="vis-dot" title="видит фото"></span>' : '');
+  const s2 = document.createElement('div');
+  s2.className = 'model-row-sub';
+  s2.textContent = m.provider + ' · ' + (STATE_RU[m.state] || m.state) +
+    (typeof m.health === 'number' && m.state !== 'new'
+      ? ` · здоровье ${Math.round(m.health * 100)}%` : '');
+  row.onclick = async () => {
+    hapticSel();
+    if (state.current) {
+      state.current.provider = m.provider;
+      state.current.model = m.model;
+      updateHead();
+      try {
+        await api('PUT', `/api/chats/${state.current.id}`,
+                  { model: `${m.provider}/${m.model}` });
+      } catch (e) { /* не критично */ }
+    } else {
+      try {
+        await ensureChatWith(m.provider, m.model);
+        warn(`Чат создан с моделью ${shortModel(m.model)}.`);
+      } catch (e) {
+        warn('Не удалось создать чат: ' + e.message);
+      }
+    }
+    closeSheets();
+    renderModelsList();
+  };
+  row.appendChild(t); row.appendChild(s2);
+  return row;
+}
+
 function renderModelsList() {
   const box = $('#models-list');
   box.innerHTML = '';
   const sorted = state.models.slice().sort((a, b) =>
     (STATE_RANK[a.state] ?? 3) - (STATE_RANK[b.state] ?? 3));
+  for (const cat of CATS) {
+    const head = document.createElement('div');
+    head.className = 'cat-head';
+    head.innerHTML = (IC[cat.icon] || '') + '<span>' + esc(cat.title) + '</span>' +
+      (cat.soon ? '<span class="soon-badge">' + IC.lock + ' скоро</span>' : '');
+    box.appendChild(head);
+    if (cat.soon) {
+      const soon = document.createElement('div');
+      soon.className = 'soon-row';
+      soon.textContent = 'Раздел появится в следующих обновлениях.';
+      box.appendChild(soon);
+      continue;
+    }
+    const list = cat.filter ? sorted.filter((m) => cat.filter.test(m.model)) : sorted;
+    if (cat.filter && !list.length) {
+      const none = document.createElement('div');
+      none.className = 'soon-row';
+      none.textContent = 'Сейчас в цепочке нет кодинг-моделей.';
+      box.appendChild(none);
+      continue;
+    }
+    for (const m of list) box.appendChild(modelRow(m));
+  }
+  return;
   for (const m of sorted) {
     const row = document.createElement('div');
     row.className = 'model-row ' + (m.state || 'ok') +
@@ -670,6 +742,57 @@ function stopThinking() {
   if (state.thinkTimer) { clearInterval(state.thinkTimer); state.thinkTimer = null; }
 }
 
+/* ================= голосовые: запись и распознавание ================= */
+let recorder = null;
+let recChunks = [];
+
+async function toggleRec(btn) {
+  if (recorder) { recorder.stop(); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+  } catch (e) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recorder = new MediaRecorder(stream);
+    } catch (e2) {
+      warn('Микрофон недоступен: разреши доступ или напиши текстом.');
+      return;
+    }
+  }
+  recChunks = [];
+  recorder.ondataavailable = (ev) => { if (ev.data && ev.data.size) recChunks.push(ev.data); };
+  recorder.onstop = async () => {
+    const blob = new Blob(recChunks, { type: recorder.mimeType || 'audio/webm' });
+    recorder.stream.getTracks().forEach((t) => t.stop());
+    recorder = null;
+    btn.classList.remove('rec');
+    haptic('light');
+    if (!blob.size) return;
+    const b64 = await new Promise((res) => {
+      const r = new FileReader();
+      r.onload = () => res(String(r.result).split(',')[1] || '');
+      r.readAsDataURL(blob);
+    });
+    warn('Распознаю голосовое…');
+    try {
+      const j = await api('POST', '/api/transcribe',
+                          { audio: b64, mime: blob.type || 'audio/webm' });
+      const inp = $('#input');
+      inp.value = (inp.value ? inp.value + ' ' : '') + (j.text || '');
+      autosize();
+      inp.focus();
+      warn('');
+      $('#warn').hidden = true;
+    } catch (e) {
+      warn('Не распознал: ' + e.message + '. Напиши текстом.');
+    }
+  };
+  recorder.start();
+  btn.classList.add('rec');
+  haptic('light');
+}
+
 /* ================= фото задания ================= */
 function clearAttach() {
   state.pendingImage = null;
@@ -698,6 +821,21 @@ function compressImage(file) {
   reader.onerror = () => warn('Не удалось открыть файл.');
   reader.readAsDataURL(file);
 }
+
+/* ================= нормальные SVG-иконки ================= */
+const IC = {
+  send: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M3.4 20.6 21 12 3.4 3.4l2.4 7.2L15 12l-9.2 1.4z"/></svg>',
+  stop: '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>',
+  clip: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M20 11.5 12.3 19a5 5 0 0 1-7-7l8.5-8.4a3.3 3.3 0 0 1 4.7 4.7L9.4 15.8a1.7 1.7 0 0 1-2.4-2.4l7.8-7.7"/></svg>',
+  mic: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/></svg>',
+  x: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  catText: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/></svg>',
+  catCode: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 7 3.5 12 8 17M16 7l4.5 5L16 17"/></svg>',
+  catImage: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="M4.5 17.5 10 12l4 4 3-3 2.5 2.5"/></svg>',
+  catVideo: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="6" width="12" height="12" rx="2.5"/><path d="M15.5 10.5 20.5 8v8l-5-2.5z"/></svg>',
+  catAudio: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4"/></svg>',
+  lock: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2.5"/><path d="M8 10V7.5a4 4 0 0 1 8 0V10"/></svg>',
+};
 
 /* ================= хаптики Telegram ================= */
 function haptic(kind) {
@@ -863,11 +1001,10 @@ async function send() {
     cur.messages.push({ role: 'assistant', content: r.reply,
                         provider: r.provider, model: r.model,
                         fallbacks: r.fallbacks || [] });
-    // на сервер история уходит без base64: только метка 📷
-    const clean = cur.messages.map((m) => {
-      if (m.image) { const c = { ...m }; delete c.image; c.hasImage = true; return c; }
-      return m;
-    });
+    // на сервер история уходит с окном из 4 последних картинок,
+    // старшие самоудаляются, оставляя метку hasImage
+    const clean = cur.messages.map((m) => ({ ...m }));
+    applyImageWindow(clean);
     try {
       await api('PUT', `/api/chats/${cur.id}`,
                 { messages: clean, title: cur.title,
@@ -909,11 +1046,20 @@ async function send() {
   }
 }
 
+function applyImageWindow(msgs) {
+  const idx = [];
+  msgs.forEach((m, i) => { if (m.image) idx.push(i); });
+  idx.slice(0, Math.max(0, idx.length - 4)).forEach((i) => {
+    delete msgs[i].image;
+    msgs[i].hasImage = true;
+  });
+}
+
 function setSendUI(busy) {
   const b = $('#btn-send');
   const ico = $('#send-ico');
   b.classList.toggle('stopping', !!busy);
-  if (ico) ico.textContent = busy ? '■' : '➤';
+  if (ico) ico.innerHTML = busy ? IC.stop : IC.send;
   b.setAttribute('aria-label', busy ? 'остановить генерацию' : 'отправить');
 }
 
@@ -993,6 +1139,8 @@ async function boot() {
       send();
     }
   };
+  const micBtn = $('#btn-mic');
+  micBtn.onclick = () => toggleRec(micBtn);
   const fileInput = $('#file-input');
   $('#btn-attach').onclick = () => fileInput.click();
   $('#attach-remove').onclick = () => clearAttach();
