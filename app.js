@@ -7,7 +7,7 @@
    Render несёт Telegram initData, подпись проверяется сервером.
    ============================================================ */
 'use strict';
-window.__APP_V = '20260921e';
+window.__APP_V = '20260921f';
 // iOS WKWebView не умеет стриминговое чтение fetch — там сразу просим целиком
 const NO_STREAM = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -421,11 +421,15 @@ function scrollBottom() {
 function fallbackLine(fallbacks, finalProvider, finalModel) {
   const row = document.createElement('div');
   row.className = 'fall-line';
-  for (const f of (fallbacks || [])) {
+  // служебное не мозолит: показываем только осмысленные причины
+  const shown = (fallbacks || []).filter((f) => f.code === 'rate' || f.code === 'cooldown');
+  const list = shown.length ? shown : (fallbacks || []).slice(0, 1);
+  for (const f of list) {
     const chip = document.createElement('span');
     chip.className = 'fall-chip';
-    chip.innerHTML = logoHtml(f.provider) + ' ' + esc(shortModel(f.model)) +
-      ' · ' + esc(FALL_REASON[f.code] || f.code);
+    const reason = f.code === 'rate' || f.code === 'cooldown'
+      ? ' · ' + esc(FALL_REASON[f.code]) : '';
+    chip.innerHTML = logoHtml(f.provider) + ' ' + esc(shortModel(f.model)) + reason;
     row.appendChild(chip);
     const ar = document.createElement('span');
     ar.className = 'fall-arrow';
@@ -1366,7 +1370,6 @@ async function chatRequest(cur, bubble) {
           { code: 0, net: !!net });
       }
       att += 1;
-      warn('Сеть мигнула — повторяю запрос (' + att + '/2)…');
       bubble.classList.add('pending');
       bubble.innerHTML = '<span class="dots"><i></i><i></i><i></i></span>';
       await new Promise((r) => setTimeout(r, att === 1 ? 900 : 2200));
@@ -1511,35 +1514,27 @@ async function send(opts = {}) {
       return;
     }
     hapticNotify('error');
-    let dbg = '';
     if (state.quota && state.quota.unlimited) {
-      // владелец при сбое видит серверную причину прямо в чате
+      // владельцу — в консоль, наружу служебное не показываем
       try {
         const d = await api('GET', '/api/debug');
-        const errs = Object.entries(d.models || {})
-          .filter(([, m]) => m.last_err).slice(0, 3)
-          .map(([k, m]) => k + ': ' + m.last_err.slice(0, 90));
-        const lc = d.last_chat || {};
-        dbg = (lc.error ? '\nСервер: ' + lc.error.slice(0, 140) : '') +
-              (errs.length ? '\n' + errs.join('\n') : '');
-      } catch (e2) { /* старый сервер без /api/debug — не страшно */ }
+        console.info('[diag]', d.last_chat, d.models);
+      } catch (e2) { /* старый сервер без /api/debug */ }
     }
     pending.textContent = '⚠️ ' + (e.code === 401
       ? 'Сессия протухла: закрой и открой приложение заново.'
       : e.code === 504
-        ? 'Сервер молчит больше 95 секунд. Нажми «Повторить» или проверь связь.'
+        ? 'Сервер не ответил вовремя.'
         : e.net
-          ? 'Сеть (LTE/WebView) сорвала запрос — я дважды повторил, не вышло. ' +
-            'Нажми «Повторить» или проверь связь.'
-          : 'Не получилось ответить: ' + e.message) + dbg;
-    if (e.net) {
-      const rb = document.createElement('button');
-      rb.className = 'retry-btn';
-      rb.textContent = 'Повторить';
-      rb.onclick = () => { rb.remove(); send({ regen: true }); };
-      pending.appendChild(rb);
-    }
-    warn('Ошибка ответа: ' + e.message);
+          ? 'Не удалось отправить: связь мигнула.'
+          : 'Не получилось ответить.');
+    const rb = document.createElement('button');
+    rb.className = 'retry-btn';
+    rb.textContent = 'Повторить';
+    rb.onclick = () => { rb.remove(); send({ regen: true }); };
+    pending.appendChild(rb);
+    warn('');
+    $('#warn').hidden = true;
   } finally {
     stopThinking();
     state.busy = false;
