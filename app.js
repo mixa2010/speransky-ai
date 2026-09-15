@@ -7,7 +7,7 @@
    Render несёт Telegram initData, подпись проверяется сервером.
    ============================================================ */
 'use strict';
-window.__APP_V = '20260921a';
+window.__APP_V = '20260921c';
 // iOS WKWebView не умеет стриминговое чтение fetch — там сразу просим целиком
 const NO_STREAM = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -1307,7 +1307,17 @@ async function _readStreamInner(res, reader, bubble) {
       if (!line) continue;
       let j;
       try { j = JSON.parse(line); } catch (e) { continue; }
-      if (j.d !== undefined) { acc += j.d; bubble.__acc = acc; paint(false); }
+      if (j.d !== undefined) {
+        acc += j.d;
+        bubble.__acc = acc;
+        // троттлинг перерисовки: на телефонах без этого «дёрганья»
+        if (!bubble.__raf) {
+          bubble.__raf = requestAnimationFrame(() => {
+            bubble.__raf = 0;
+            paint(false);
+          });
+        }
+      }
       else if (j.error) { throw Object.assign(new Error(j.error), { code: 502 }); }
       else { meta = j; }
     }
@@ -1323,22 +1333,45 @@ async function _readStreamInner(res, reader, bubble) {
 async function chatRequest(cur, bubble) {
   state.abortCtl = new AbortController();
   let timedOut = false;
-  const silence = setTimeout(() => { timedOut = true; state.abortCtl.abort(); }, 90000);
+  let silence = setTimeout(() => { timedOut = true; state.abortCtl.abort(); }, 120000);
   let res;
-  try {
-    res = await fetch(API_BASE + '/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: state.abortCtl.signal,
-      body: JSON.stringify({
-        initData: INIT_DATA, provider: cur.provider, model: cur.model,
-        messages: cur.messages, stream: !NO_STREAM,
-      }),
-    });
-  } catch (e) {
-    clearTimeout(silence);
-    if (timedOut) throw Object.assign(new Error('сервер молчит >90 секунд'), { code: 504 });
-    throw e;
+  let att = 0;
+  for (;;) {
+    try {
+      res = await fetch(API_BASE + '/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: state.abortCtl.signal,
+        body: JSON.stringify({
+          initData: INIT_DATA, provider: cur.provider, model: cur.model,
+          messages: cur.messages, stream: !NO_STREAM,
+        }),
+      });
+      break;
+    } catch (e) {
+      if (timedOut) {
+        clearTimeout(silence);
+        throw Object.assign(new Error('сервер молчит >120 секунд'), { code: 504 });
+      }
+      const net = /Load failed|Failed to fetch|NetworkError|network/i
+        .test(String(e && e.message));
+      if (!net || att >= 2) {
+        clearTimeout(silence);
+        throw Object.assign(
+          new Error(net ? 'сеть сорвала запрос (LTE/WebView)' : String(e && e.message)),
+          { code: 0, net: !!net });
+      }
+      att += 1;
+      warn('Сеть мигнула — повторяю запрос (' + att + '/2)…');
+      bubble.classList.add('pending');
+      bubble.innerHTML = '<span class="dots"><i></i><i></i><i></i></span>';
+      await new Promise((r) => setTimeout(r, att === 1 ? 900 : 2200));
+      if (!voOpen) haptic('light');
+      state.abortCtl = new AbortController();
+      timedOut = false;
+      clearTimeout(silence);
+      silence = setTimeout(() => { timedOut = true; state.abortCtl.abort(); }, 120000);
+    }
   }
   clearTimeout(silence);
   const ct = res.headers.get('content-type') || '';
@@ -1474,11 +1507,34 @@ async function send(opts = {}) {
       return;
     }
     hapticNotify('error');
+    let dbg = '';
+    if (state.quota && state.quota.unlimited) {
+      // владелец при сбое видит серверную причину прямо в чате
+      try {
+        const d = await api('GET', '/api/debug');
+        const errs = Object.entries(d.models || {})
+          .filter(([, m]) => m.last_err).slice(0, 3)
+          .map(([k, m]) => k + ': ' + m.last_err.slice(0, 90));
+        const lc = d.last_chat || {};
+        dbg = (lc.error ? '\nСервер: ' + lc.error.slice(0, 140) : '') +
+              (errs.length ? '\n' + errs.join('\n') : '');
+      } catch (e2) { /* старый сервер без /api/debug — не страшно */ }
+    }
     pending.textContent = '⚠️ ' + (e.code === 401
       ? 'Сессия протухла: закрой и открой приложение заново.'
       : e.code === 504
-        ? 'Сервер молчит больше 90 секунд. Попробуй ещё раз или проверь интернет.'
-        : 'Не получилось ответить: ' + e.message);
+        ? 'Сервер молчит больше 120 секунд. Попробуй ещё раз или проверь интернет.'
+        : e.net
+          ? 'Сеть (LTE/WebView) сорвала запрос — я дважды повторил, не вышло. ' +
+            'Нажми «Повторить» или проверь связь.'
+          : 'Не получилось ответить: ' + e.message) + dbg;
+    if (e.net) {
+      const rb = document.createElement('button');
+      rb.className = 'retry-btn';
+      rb.textContent = 'Повторить';
+      rb.onclick = () => { rb.remove(); send({ regen: true }); };
+      pending.appendChild(rb);
+    }
     warn('Ошибка ответа: ' + e.message);
   } finally {
     stopThinking();
@@ -2183,6 +2239,11 @@ async function boot() {
     paintMessages();
   }
   loadQuota();
+  /* «тёплый» пинг Render: лёгкий запрос раз в 4 минуты, чтобы бесплатная
+     инстанса не засыпала между вопросами и не подвисала на холоде */
+  setInterval(() => {
+    if (INIT_DATA) fetch(API_BASE + '/api/quota').catch(() => {});
+  }, 240000);
 }
 
 if (document.readyState === 'loading') {

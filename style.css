@@ -223,6 +223,12 @@ body { display: flex; flex-direction: column; }
 }
 
 /* действия под ответом: ряд мини-иконок, как в больших чат-ботах */
+.retry-btn {
+  margin: 10px 2px 0; padding: 8px 18px; border: 0; border-radius: 999px;
+  background: var(--accent); color: var(--accent-tx);
+  font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.retry-btn:active { transform: scale(.96); }
 .msg-actions { display: flex; gap: 14px; padding: 8px 2px 0; opacity: .55;
   transition: opacity .18s var(--ease); }
 .msg.bot:hover .msg-actions, .msg-actions:focus-within { opacity: 1; }
