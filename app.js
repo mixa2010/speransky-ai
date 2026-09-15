@@ -7,7 +7,7 @@
    Render несёт Telegram initData, подпись проверяется сервером.
    ============================================================ */
 'use strict';
-window.__APP_V = '20260917a';
+window.__APP_V = '20260918a';
 // iOS WKWebView не умеет стриминговое чтение fetch — там сразу просим целиком
 const NO_STREAM = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -454,9 +454,75 @@ function addMessageEl(role, text, opts = {}) {
     meta.innerHTML = logoHtml(opts.provider) + ' ' + esc(opts.model);
     wrap.appendChild(meta);
   }
+  if (role !== 'user' && !opts.pending && text) {
+    wrap.appendChild(buildActions(text, !!opts.__canRegen));
+  }
   $('#messages').appendChild(wrap);
   scrollBottom();
   return bubble;
+}
+
+/* ---------------- действия под ответом: копировать / заново ---------------- */
+async function copyText(t) {
+  try {
+    await navigator.clipboard.writeText(t);
+  } catch (e) {
+    const ta = document.createElement('textarea');
+    ta.value = t;
+    ta.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (e2) { /* совсем без буфера */ }
+    ta.remove();
+  }
+  warn('Скопировано в буфер обмена.');
+}
+
+function buildActions(text, canRegen) {
+  const acts = document.createElement('div');
+  acts.className = 'msg-actions';
+  const cp = document.createElement('button');
+  cp.className = 'act-btn';
+  cp.type = 'button';
+  cp.title = 'Скопировать ответ';
+  cp.innerHTML = IC.copy + '<span>копировать</span>';
+  cp.onclick = (e) => { e.stopPropagation(); haptic('light'); copyText(text); };
+  acts.appendChild(cp);
+  if (canRegen) {
+    const rg = document.createElement('button');
+    rg.className = 'act-btn act-regen';
+    rg.type = 'button';
+    rg.title = 'Перегенерировать ответ';
+    rg.innerHTML = IC.regen + '<span>заново</span>';
+    rg.onclick = (e) => { e.stopPropagation(); hapticSel(); regenerateLast(); };
+    acts.appendChild(rg);
+  }
+  return acts;
+}
+
+/* кнопка «заново» имеет смысл только у последнего ответа —
+   убираем устаревшие, когда ниже появился новый ответ */
+function dedupeRegen() {
+  const acts = document.querySelectorAll('#messages .msg-actions');
+  acts.forEach((a, i) => {
+    const rg = a.querySelector('.act-regen');
+    if (rg && i !== acts.length - 1) rg.remove();
+  });
+}
+
+function regenerateLast() {
+  if (state.busy || !state.current) return;
+  const msgs = state.current.messages;
+  while (msgs.length && msgs[msgs.length - 1].role === 'assistant') msgs.pop();
+  if (!msgs.length || msgs[msgs.length - 1].role !== 'user') {
+    return warn('Не нашёл вопрос для перегенерации.');
+  }
+  const u = msgs.pop();
+  paintMessages();
+  const inp = $('#input');
+  inp.value = u.content || '';
+  if (u.image) state.pendingImage = u.image;
+  send();
 }
 
 function paintMessages() {
@@ -480,7 +546,11 @@ function paintMessages() {
     }
   }
   box.hidden = false;
-  for (const m of msgs) addMessageEl(m.role, m.content, m);
+  let lastBot = -1;
+  msgs.forEach((m, i) => { if (m.role !== 'user') lastBot = i; });
+  msgs.forEach((m, i) => addMessageEl(
+    m.role, m.content,
+    i === lastBot ? Object.assign({}, m, { __canRegen: !state.busy }) : m));
 }
 
 /* ================= чаты и модели ================= */
@@ -543,7 +613,8 @@ function renderChatsList() {
   const box = $('#chats-list');
   box.innerHTML = '';
   if (!state.chats.length) {
-    box.innerHTML = '<div class="sheet-empty">Чатов пока нет — нажми ✚ сверху.</div>';
+    box.innerHTML = '<div class="sheet-empty">Чатов пока нет — нажми «плюс» сверху ' +
+      'или просто напиши сообщение.</div>';
     return;
   }
   for (const c of state.chats) {
@@ -557,11 +628,20 @@ function renderChatsList() {
     s.textContent = shortModel(c.model) + ' · ' + String(c.updated_at || '').slice(5, 16);
     const del = document.createElement('button');
     del.className = 'icon-btn chat-del';
-    del.textContent = '✕';
+    del.title = 'Удалить чат';
+    del.innerHTML = IC.x;
     del.onclick = (e) => {
       e.stopPropagation();
-      if (del.dataset.arm) { deleteChat(c.id); }
-      else { del.dataset.arm = '1'; del.textContent = 'точно?'; del.classList.add('armed'); }
+      if (del.dataset.arm) { deleteChat(c.id); return; }
+      del.dataset.arm = '1';
+      del.textContent = 'точно?';
+      del.classList.add('armed');
+      clearTimeout(del._t);
+      del._t = setTimeout(() => {
+        delete del.dataset.arm;
+        del.classList.remove('armed');
+        del.innerHTML = IC.x;
+      }, 3000);
     };
     row.onclick = () => openChat(c.id);
     row.appendChild(t); row.appendChild(s); row.appendChild(del);
@@ -570,12 +650,21 @@ function renderChatsList() {
 }
 
 const STATE_RANK = { ok: 0, new: 1, unstable: 2, cooldown: 3, dead: 4 };
+/* Короткие честные подписи статусов: без «процентов здоровья» —
+   статус считает сервер по последним реальным ответам модели. */
 const STATE_RU = {
-  ok: '✅ доступна',
-  new: '🆕 новая, ещё не проверена',
-  unstable: '⚠️ нестабильна (были сбои)',
-  cooldown: '⏳ отдыхает после лимита',
-  dead: '❌ недоступна этому ключу',
+  ok: 'работает',
+  new: 'новая, ещё не проверена',
+  unstable: 'нестабильна (были сбои)',
+  cooldown: 'отдыхает после лимита',
+  dead: 'недоступна этому ключу',
+};
+const STATE_TT = {
+  ok: 'Отвечает стабильно',
+  new: 'Ещё не проверяли в деле',
+  unstable: 'Последние ответы были со сбоями',
+  cooldown: 'Бесплатный лимит исчерпан — скоро вернётся',
+  dead: 'Ключ провайдера не отдаёт эту модель',
 };
 async function ensureChatWith(provider, model) {
   const row = await api('POST', '/api/chats',
@@ -606,9 +695,11 @@ function modelRow(m) {
     (m.vision ? ' <span class="vis-dot" title="видит фото"></span>' : '');
   const s2 = document.createElement('div');
   s2.className = 'model-row-sub';
-  s2.textContent = m.provider + ' · ' + (STATE_RU[m.state] || m.state) +
-    (typeof m.health === 'number' && m.state !== 'new'
-      ? ` · здоровье ${Math.round(m.health * 100)}%` : '');
+  s2.textContent = m.provider + ' · ' + (STATE_RU[m.state] || m.state);
+  const dot = document.createElement('span');
+  dot.className = 'st-dot st-' + (m.state || 'ok');
+  dot.title = STATE_TT[m.state] || 'Статус неизвестен';
+  dot.setAttribute('aria-label', dot.title);
   row.onclick = async () => {
     hapticSel();
     if (state.current) {
@@ -630,7 +721,7 @@ function modelRow(m) {
     closeSheets();
     renderModelsList();
   };
-  row.appendChild(t); row.appendChild(s2);
+  row.appendChild(t); row.appendChild(dot); row.appendChild(s2);
   return row;
 }
 
@@ -647,60 +738,27 @@ function renderModelsList() {
     box.appendChild(head);
     if (cat.soon) {
       const soon = document.createElement('div');
-      soon.className = 'soon-row';
-      soon.textContent = 'Раздел появится в следующих обновлениях.';
+      soon.className = 'soon-tile';
+      soon.innerHTML = '<span class="soon-tile-ico">' + (IC[cat.icon] || '') + '</span>' +
+        '<span class="soon-tile-tx"><b>' + esc(cat.title) + '</b>' +
+        '<small>в разработке</small></span>' +
+        '<span class="soon-badge">' + IC.lock + ' скоро</span>';
       box.appendChild(soon);
       continue;
     }
-    const list = cat.filter ? sorted.filter((m) => cat.filter.test(m.model)) : sorted;
-    if (cat.filter && !list.length) {
+    // категория с фильтром — свои модели; без фильтра — все, кроме
+    // попавших в другие категории (иначе кодинг-модели дублируются)
+    const list = cat.filter
+      ? sorted.filter((m) => cat.filter.test(m.model))
+      : sorted.filter((m) => !CATS.some((c) => c.filter && c.filter.test(m.model)));
+    if (!list.length) {
       const none = document.createElement('div');
       none.className = 'soon-row';
-      none.textContent = 'Сейчас в цепочке нет кодинг-моделей.';
+      none.textContent = 'В этой категории пока нет доступных моделей.';
       box.appendChild(none);
       continue;
     }
     for (const m of list) box.appendChild(modelRow(m));
-  }
-  return;
-  for (const m of sorted) {
-    const row = document.createElement('div');
-    row.className = 'model-row ' + (m.state || 'ok') +
-      (state.current && state.current.provider === m.provider &&
-       state.current.model === m.model ? ' active' : '');
-    const t = document.createElement('div');
-    t.className = 'model-row-title';
-    t.innerHTML = logoHtml(m.provider) + ' ' + esc(m.model) +
-      (m.vision ? ' 📷' : '');
-    const s = document.createElement('div');
-    s.className = 'model-row-sub';
-    s.textContent = m.provider + ' · ' + (STATE_RU[m.state] || '✅ доступна') +
-      (typeof m.health === 'number' && m.state !== 'new'
-        ? ` · здоровье ${Math.round(m.health * 100)}%` : '');
-    row.onclick = async () => {
-      hapticSel();
-      if (state.current) {
-        state.current.provider = m.provider;
-        state.current.model = m.model;
-        updateHead();
-        try {
-          await api('PUT', `/api/chats/${state.current.id}`,
-                    { model: `${m.provider}/${m.model}` });
-        } catch (e) { /* не критично */ }
-      } else {
-        // чата ещё нет: выбор модели сам создаёт чат
-        try {
-          await ensureChatWith(m.provider, m.model);
-          warn(`Чат создан с моделью ${shortModel(m.model)}.`);
-        } catch (e) {
-          warn('Не удалось создать чат: ' + e.message);
-        }
-      }
-      closeSheets();
-      renderModelsList();
-    };
-    row.appendChild(t); row.appendChild(s);
-    box.appendChild(row);
   }
 }
 
@@ -745,6 +803,27 @@ function stopThinking() {
 /* ================= голосовые: запись и распознавание ================= */
 let recorder = null;
 let recChunks = [];
+let recTimer = null;
+
+function showRecBar() {
+  const bar = $('#rec-bar');
+  if (!bar) return;
+  bar.hidden = false;
+  const t0 = Date.now();
+  const el = $('#rec-time');
+  const tick = () => {
+    const s = Math.floor((Date.now() - t0) / 1000);
+    if (el) el.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  };
+  tick();
+  recTimer = setInterval(tick, 500);
+}
+
+function hideRecBar() {
+  if (recTimer) { clearInterval(recTimer); recTimer = null; }
+  const bar = $('#rec-bar');
+  if (bar) bar.hidden = true;
+}
 
 async function toggleRec(btn) {
   if (recorder) { recorder.stop(); return; }
@@ -767,6 +846,7 @@ async function toggleRec(btn) {
     recorder.stream.getTracks().forEach((t) => t.stop());
     recorder = null;
     btn.classList.remove('rec');
+    hideRecBar();
     haptic('light');
     if (!blob.size) return;
     const b64 = await new Promise((res) => {
@@ -790,6 +870,7 @@ async function toggleRec(btn) {
   };
   recorder.start();
   btn.classList.add('rec');
+  showRecBar();
   haptic('light');
 }
 
@@ -835,6 +916,10 @@ const IC = {
   catVideo: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="6" width="12" height="12" rx="2.5"/><path d="M15.5 10.5 20.5 8v8l-5-2.5z"/></svg>',
   catAudio: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4"/></svg>',
   lock: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2.5"/><path d="M8 10V7.5a4 4 0 0 1 8 0V10"/></svg>',
+  copy: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>',
+  regen: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4.5h-4.5"/></svg>',
+  trash: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg>',
+  check: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5 5L20 6.5"/></svg>',
 };
 
 /* ================= хаптики Telegram ================= */
@@ -986,6 +1071,8 @@ async function send() {
       pending.parentNode.insertBefore(fallbackLine(r.fallbacks, r.provider, r.model),
                                       pending.parentNode.firstChild);
     }
+    pending.parentNode.appendChild(buildActions(r.reply || pending.__acc || '', true));
+    dedupeRegen();
     scrollBottom();
     if (r.fallbacks && r.fallbacks.length &&
         (r.provider !== cur.provider || r.model !== cur.model)) {
@@ -1105,10 +1192,17 @@ async function boot() {
       wipe.dataset.arm = '1';
       wipe.textContent = 'точно?';
       wipe.classList.add('armed');
+      clearTimeout(wipe._t);
+      wipe._t = setTimeout(() => {
+        wipe.dataset.arm = '';
+        wipe.classList.remove('armed');
+        wipe.innerHTML = IC.trash;
+      }, 3000);
       return;
     }
     wipe.dataset.arm = '';
-    wipe.textContent = '🗑';
+    clearTimeout(wipe._t);
+    wipe.innerHTML = IC.trash;
     wipe.classList.remove('armed');
     try {
       await api('DELETE', '/api/chats');

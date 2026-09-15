@@ -41,6 +41,13 @@
     --glass: color-mix(in srgb, var(--bg) 78%, transparent);
     --glass-2: color-mix(in srgb, var(--surface-1) 86%, transparent);
   }
+  /* светлая тема: мягкие тени вместо тяжёлых чёрных */
+  :root:not([data-tg-theme]) .bubble { box-shadow: 0 4px 14px rgba(19, 23, 34, .08); }
+  :root:not([data-tg-theme]) .msg.user .bubble {
+    box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 22%, transparent); }
+  :root:not([data-tg-theme]) .sheet-body { box-shadow: 0 -12px 40px rgba(19, 23, 34, .16); }
+  :root:not([data-tg-theme]) .send-btn {
+    box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 25%, transparent); }
 }
 
 * { box-sizing: border-box; }
@@ -199,6 +206,21 @@ body { display: flex; flex-direction: column; }
   object-fit: contain; background: #fff; border: 1px solid var(--hair); padding: 1px;
 }
 
+/* действия под ответом: копировать / заново */
+.msg-actions { display: flex; gap: 6px; padding: 3px 4px 0; opacity: .65;
+  transition: opacity .18s var(--ease); }
+.msg.bot:hover .msg-actions, .msg-actions:focus-within { opacity: 1; }
+.act-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid var(--hair); background: transparent; color: var(--hint);
+  border-radius: 999px; padding: 3px 10px; font-size: 11px; font-family: inherit;
+  cursor: pointer; transition: color .15s var(--ease), border-color .15s var(--ease),
+                              transform .15s var(--ease);
+}
+.act-btn:hover { color: var(--text); border-color: var(--hair-str); }
+.act-btn:active { transform: scale(.94); }
+.act-btn svg { vertical-align: -2px; }
+
 /* фото в пузыре */
 .msg-img { max-width: 250px; width: 100%; border-radius: var(--r-md);
            display: block; margin: 0 0 8px; border: 1px solid var(--hair); }
@@ -263,6 +285,38 @@ body { display: flex; flex-direction: column; }
 }
 .attach-preview img { width: 64px; height: 64px; object-fit: cover;
   border-radius: 14px; border: 1px solid var(--hair); }
+
+/* ---------------- индикатор записи голоса ---------------- */
+.rec-bar {
+  position: sticky; bottom: 74px; z-index: 26;
+  display: flex; gap: 10px; align-items: center;
+  max-width: 860px; width: fit-content; margin: 0 auto; padding: 9px 16px;
+  background: var(--glass-2);
+  border: 1px solid color-mix(in srgb, #ff5c5c 45%, var(--hair));
+  border-radius: 999px;
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 6px 20px rgba(255, 92, 92, .12);
+  animation: pop-in .22s var(--ease);
+}
+.rec-dot { width: 10px; height: 10px; flex: 0 0 10px; border-radius: 50%;
+  background: #ff5c5c; animation: rec-blink 1.1s ease-in-out infinite; }
+@keyframes rec-blink { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+.rec-time { font-family: var(--mono); font-size: 13px; color: var(--text);
+  min-width: 36px; }
+.rec-wave { display: inline-flex; gap: 3px; align-items: center; height: 16px; }
+.rec-wave i { width: 3px; height: 35%; border-radius: 2px; background: #ff5c5c;
+  opacity: .85; animation: rec-wave .9s ease-in-out infinite; }
+.rec-wave i:nth-child(2) { animation-delay: .12s; }
+.rec-wave i:nth-child(3) { animation-delay: .24s; }
+.rec-wave i:nth-child(4) { animation-delay: .36s; }
+.rec-wave i:nth-child(5) { animation-delay: .48s; }
+.rec-wave i:nth-child(6) { animation-delay: .6s; }
+.rec-wave i:nth-child(7) { animation-delay: .72s; }
+.rec-wave i:nth-child(8) { animation-delay: .84s; }
+.rec-wave i:nth-child(9) { animation-delay: .96s; }
+@keyframes rec-wave { 0%, 100% { height: 30%; } 50% { height: 100%; } }
+.rec-hint { color: var(--hint); font-size: 12px; }
+@media (max-width: 480px) { .rec-hint { display: none; } }
 
 /* ---------------- композер (стеклянная пилюля) ---------------- */
 .composer {
@@ -345,9 +399,22 @@ body { display: flex; flex-direction: column; }
 .chat-row-sub, .model-row-sub { grid-column: 1; color: var(--hint); font-size: 12.5px; }
 .chat-del { grid-row: 1 / span 2; grid-column: 2; align-self: center; font-size: 12px; }
 .chat-del.armed { color: var(--err); border-color: var(--err); }
-.model-row.dead { opacity: .5; }
-.model-row.unstable { opacity: .8; }
-.model-row.cooldown { opacity: .7; }
+.model-row.dead { opacity: .55; }
+.model-row.unstable { opacity: .85; }
+.model-row.cooldown { opacity: .75; }
+
+/* статус-индикатор модели: честная точка вместо «процентов здоровья» */
+.st-dot { grid-row: 1 / span 2; grid-column: 2; align-self: center;
+  width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+.st-dot.st-ok { background: var(--ok);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--ok) 55%, transparent); }
+.st-dot.st-new { background: var(--link);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--link) 45%, transparent); }
+.st-dot.st-unstable { background: var(--warn-c);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--warn-c) 45%, transparent); }
+.st-dot.st-cooldown { background: #ff9f43;
+  box-shadow: 0 0 8px rgba(255, 159, 67, .45); }
+.st-dot.st-dead { background: var(--err); opacity: .55; }
 
 /* ---------------- пилюля смены модели ---------------- */
 .fall-line {
@@ -366,6 +433,25 @@ body { display: flex; flex-direction: column; }
 @media (min-width: 700px) {
   .bubble { max-width: 72%; }
   .messages { padding: 20px 18px 14px; }
+  /* шторки → центрированные модалки */
+  .sheet-body {
+    top: 50%; left: 50%; right: auto; bottom: auto;
+    transform: translate(-50%, -50%);
+    width: min(580px, 92vw); max-height: 82vh;
+    border-radius: 26px;
+    border: 1px solid var(--hair-str);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, .4);
+    animation: sheet-pop .3s var(--spring);
+  }
+  .sheet-body::before { display: none; }
+  .sheet-head { padding-top: 16px; }
+  .chats-list, .models-list {
+    padding-bottom: 18px;
+  }
+  @keyframes sheet-pop {
+    from { opacity: 0; transform: translate(-50%, -46%) scale(.97); }
+    to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  }
 }
 .msg.user .msg-img-ph { color: rgba(255,255,255,.82); }
 .cta-btn {
@@ -389,6 +475,29 @@ body { display: flex; flex-direction: column; }
   border: 1px solid var(--hair); border-radius: 999px; padding: 2px 9px;
   font-size: 10.5px; letter-spacing: .04em; }
 .soon-row { color: var(--hint); font-size: 12.5px; padding: 4px 6px 8px; }
+
+/* тизер раздела «скоро»: иконка-плитка вместо серой строчки */
+.soon-tile {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; margin-bottom: 6px;
+  border: 1px dashed var(--hair-str); border-radius: var(--r-md);
+  background:
+    linear-gradient(135deg,
+      color-mix(in srgb, var(--accent) 5%, transparent),
+      color-mix(in srgb, var(--accent-2) 5%, transparent));
+  color: var(--hint);
+}
+.soon-tile-ico {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 38px; height: 38px; flex: 0 0 38px; border-radius: 12px;
+  background: var(--glass-2); border: 1px solid var(--hair);
+  color: var(--hint);
+}
+.soon-tile-ico svg { width: 19px; height: 19px; opacity: .8; }
+.soon-tile-tx { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+.soon-tile-tx b { color: var(--text); font-size: 13.5px; font-weight: 600; opacity: .85; }
+.soon-tile-tx small { font-size: 11.5px; }
+.soon-tile .soon-badge { margin: 0; flex: 0 0 auto; }
 .vis-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
   background: var(--ok); box-shadow: 0 0 6px var(--ok); }
 .icon-btn svg { vertical-align: -3px; }

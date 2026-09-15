@@ -15,9 +15,9 @@
         crossorigin="anonymous"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"
         crossorigin="anonymous"></script>
-<script defer src="app.js?v=20260917a"></script>
+<script defer src="app.js?v=20260918a"></script>
 
-<link rel="stylesheet" href="style.css?v=20260915a">
+<link rel="stylesheet" href="style.css?v=20260918a">
 </head>
 <body>
 
@@ -32,15 +32,15 @@
   <div class="fatal-emoji">🤔</div>
   <h1>Не открылось</h1>
   <p id="fatal-text">Что-то пошло не так.</p>
-  <button id="fatal-retry" class="icon-btn fatal-retry">🔄 Повторить</button>
+  <button id="fatal-retry" class="icon-btn fatal-retry"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4.5h-4.5"/></svg> Повторить</button>
 </div>
 
 <header id="head" hidden>
   <div class="head-row">
-    <button id="btn-chats" class="icon-btn" title="Чаты">☰</button>
+    <button id="btn-chats" class="icon-btn" title="Чаты" aria-label="Чаты"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/></svg></button>
     <div class="head-title" id="head-title">Новый чат</div>
     <button id="btn-model" class="chip model-chip" title="Модель">model</button>
-    <button id="btn-new" class="icon-btn" title="Новый чат">✚</button>
+    <button id="btn-new" class="icon-btn" title="Новый чат" aria-label="Новый чат"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
   </div>
 </header>
 
@@ -63,6 +63,13 @@
   <button id="attach-remove" class="icon-btn" title="Убрать фото" aria-label="Убрать фото"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
 </div>
 
+<div id="rec-bar" class="rec-bar" hidden>
+  <span class="rec-dot" aria-hidden="true"></span>
+  <span id="rec-time" class="rec-time">0:00</span>
+  <span class="rec-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+  <span class="rec-hint">запись — нажми микрофон ещё раз, чтобы остановить</span>
+</div>
+
 <footer id="composer" class="composer" hidden>
   <button id="btn-mic" class="icon-btn attach-btn" title="Голосовое сообщение" aria-label="Голосовое сообщение">
     <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/></svg>
@@ -82,7 +89,7 @@
     <div class="sheet-head">
       <span>Чаты</span>
       <span class="sheet-head-actions">
-        <button id="btn-wipe" class="icon-btn" title="Удалить всю мою историю">🗑</button>
+        <button id="btn-wipe" class="icon-btn" title="Удалить всю мою историю" aria-label="Удалить всю мою историю"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg></button>
         <button class="icon-btn sheet-close" aria-label="Закрыть"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
       </span>
     </div>
@@ -103,7 +110,7 @@
 </div>
 
 <script>
-window.__NEED_APP_V = '20260917a';
+window.__NEED_APP_V = '20260918a';
 window.addEventListener('load', function () {
   if (window.__APP_V !== window.__NEED_APP_V) {
     var k = 'bust-' + window.__NEED_APP_V;
@@ -116,5 +123,5 @@ window.addEventListener('load', function () {
   }
 });
 </script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3b52d4eb8e4098e',t:'MTc4OTQ0OTU3MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
