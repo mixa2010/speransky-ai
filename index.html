@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#0f1115">
+<meta name="theme-color" content="#000000">
 <title>Сперанский AI</title>
 
 <link rel="preconnect" href="https://homework-bot-6h3b.onrender.com" crossorigin>
@@ -15,9 +15,9 @@
         crossorigin="anonymous"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"
         crossorigin="anonymous"></script>
-<script defer src="app.js?v=20260918a"></script>
+<script defer src="app.js?v=20260920a"></script>
 
-<link rel="stylesheet" href="style.css?v=20260918a">
+<link rel="stylesheet" href="style.css?v=20260920a">
 </head>
 <body>
 
@@ -37,10 +37,14 @@
 
 <header id="head" hidden>
   <div class="head-row">
-    <button id="btn-chats" class="icon-btn" title="Чаты" aria-label="Чаты"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/></svg></button>
-    <div class="head-title" id="head-title">Новый чат</div>
-    <button id="btn-model" class="chip model-chip" title="Модель">model</button>
-    <button id="btn-new" class="icon-btn" title="Новый чат" aria-label="Новый чат"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button id="btn-chats" class="round-btn" title="Меню" aria-label="Меню">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9.5h16M4 14.5h11"/></svg>
+    </button>
+    <button id="btn-model" class="head-pill" title="Модель">модель</button>
+    <span class="head-spacer"></span>
+    <button id="btn-ctx" class="round-btn" title="О чате" aria-label="О чате">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 6.1L20 11l-6.1 1.9L12 19l-1.9-6.1L4 11l6.1-1.9z"/></svg>
+    </button>
   </div>
 </header>
 
@@ -52,10 +56,10 @@
   <svg class="empty-spark" viewBox="0 0 24 24" aria-hidden="true">
     <path d="M12 1l2.6 8.4L23 12l-8.4 2.6L12 23l-2.6-8.4L1 12l8.4-2.6z"/>
   </svg>
-  <h2 id="empty-title">Начнём?</h2>
-  <p id="empty-text">Выбери модель — чат создастся сразу.<br>
-     Или просто напиши вопрос / прикрепи фото скрепкой.</p>
-  <button id="btn-start-cta" class="cta-btn">✨ Выбрать модель и начать</button>
+  <h2 id="empty-title">Привет! Я Сперанский AI</h2>
+  <p id="empty-text">Объясняю и решаю по школьному и универу.<br>Начни с одного из действий:</p>
+  <div id="quick-actions" class="quick-actions"></div>
+  <button id="btn-start-cta" class="cta-link">или выбери модель вручную</button>
 </div>
 
 <div id="attach-preview" class="attach-preview" hidden>
@@ -71,29 +75,49 @@
 </div>
 
 <footer id="composer" class="composer" hidden>
-  <button id="btn-mic" class="icon-btn attach-btn" title="Голосовое сообщение" aria-label="Голосовое сообщение">
-    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/></svg>
-  </button>
-  <button id="btn-attach" class="icon-btn attach-btn" title="Фото задания" aria-label="Фото задания">
-    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M20 11.5 12.3 19a5 5 0 0 1-7-7l8.5-8.4a3.3 3.3 0 0 1 4.7 4.7L9.4 15.8a1.7 1.7 0 0 1-2.4-2.4l7.8-7.7"/></svg>
-  </button>
-  <input id="file-input" type="file" accept="image/*" hidden>
-  <textarea id="input" rows="1" placeholder="Сообщение…"></textarea>
-  <button id="btn-send" class="send-btn" title="Отправить" aria-label="Отправить"><span id="send-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M3.4 20.6 21 12 3.4 3.4l2.4 7.2L15 12l-9.2 1.4z"/></svg></span></button>
+  <div class="composer-pill">
+    <button id="btn-attach" class="plain-btn" title="Фото задания" aria-label="Фото задания">
+      <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+    <input id="file-input" type="file" accept="image/*" hidden>
+    <textarea id="input" rows="1" placeholder="Спроси Сперанского…"></textarea>
+    <button id="btn-mic" class="plain-btn" title="Голосовой ввод" aria-label="Голосовой ввод">
+      <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/></svg>
+    </button>
+    <button id="btn-voice" class="voice-btn" title="Голосовой режим" aria-label="Голосовой режим">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><path d="M8 10v4M12 7v10M16 10v4"/></svg>
+    </button>
+    <button id="btn-send" class="send-btn" title="Отправить" aria-label="Отправить"><span id="send-ico"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V6M6 12l6-6 6 6"/></svg></span></button>
+  </div>
 </footer>
 
-<!-- оверлей: список чатов -->
-<div id="chats-sheet" class="sheet" hidden>
-  <div class="sheet-back"></div>
-  <div class="sheet-body">
-    <div class="sheet-head">
-      <span>Чаты</span>
-      <span class="sheet-head-actions">
-        <button id="btn-wipe" class="icon-btn" title="Удалить всю мою историю" aria-label="Удалить всю мою историю"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg></button>
-        <button class="icon-btn sheet-close" aria-label="Закрыть"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+<!-- боковое меню (drawer) -->
+<div id="chats-sheet" class="drawer" hidden>
+  <div class="sheet-back drawer-back"></div>
+  <div class="drawer-body">
+    <div class="drawer-head">
+      <span class="drawer-brand">Сперанский AI</span>
+      <button id="btn-find-global" class="round-btn" title="Поиск по чатам" aria-label="Поиск по чатам"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg></button>
+    </div>
+    <input id="drawer-filter" class="drawer-filter" placeholder="Поиск чатов…" hidden>
+    <nav class="drawer-nav" aria-label="Разделы">
+      <div class="nav-row soon-nav" data-soon="Генерация изображений"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="M4.5 17l5-4.5 4 3.5 3-2.5 3 3"/></svg><span>Изображения</span></div>
+      <div class="nav-row soon-nav" data-soon="Библиотека ответов"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11v18H6.5A2.5 2.5 0 0 0 4 18.5z"/><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H13v18h4.5a2.5 2.5 0 0 1 2.5-2.5z"/></svg><span>Библиотека</span></div>
+      <div class="nav-row soon-nav" data-soon="Проекты"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 7a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></svg><span>Проекты</span></div>
+      <div class="nav-row soon-nav" data-soon="Плагины"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8.5v7M8.5 12h7"/></svg><span>Плагины</span></div>
+    </nav>
+    <div class="drawer-label">Недавние</div>
+    <div id="chats-list" class="chats-list"></div>
+    <div class="drawer-foot">
+      <span id="quota-pill" class="quota-pill" hidden></span>
+      <span class="drawer-foot-row">
+        <button id="btn-new" class="newchat-pill">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19z"/></svg>
+          Чат
+        </button>
+        <button id="btn-settings" class="round-btn" title="Настройки" aria-label="Настройки"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8l1.2 2.6 2.8-.6 1 2.7 2.8.7-.6 2.8 2 2-2 2 .6 2.8-2.8.7-1 2.7-2.8-.6L12 21.2l-1.2-2.6-2.8.6-1-2.7-2.8-.7.6-2.8-2-2 2-2-.6-2.8 2.8-.7 1-2.7 2.8.6z"/></svg></button>
       </span>
     </div>
-    <div id="chats-list" class="chats-list"></div>
   </div>
 </div>
 
@@ -105,12 +129,151 @@
       <span>Модель</span>
       <button class="icon-btn sheet-close" aria-label="Закрыть"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
+    <div id="model-tabs" class="cat-tabs" role="tablist" aria-label="Категории моделей"></div>
     <div id="models-list" class="models-list"></div>
   </div>
 </div>
 
+<!-- настройки -->
+<div id="settings-sheet" class="sheet" hidden>
+  <div class="sheet-back"></div>
+  <div class="sheet-body set-body">
+    <button class="round-btn set-close sheet-close" aria-label="Закрыть"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    <div class="set-profile">
+      <div class="set-avatar" id="set-avatar">??<span class="set-avatar-badge"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19z"/></svg></span></div>
+      <div class="set-name" id="set-name">Гость</div>
+    </div>
+    <div class="set-section">Внешний вид</div>
+    <div class="set-card">
+      <button class="set-row" id="set-theme">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></svg>
+        <span>Оформление</span><span class="set-val" id="set-theme-val">Системное</span>
+      </button>
+      <button class="set-row" id="set-accent">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1.4 0 2.2-.9 2.2-2 0-.6-.2-1-.6-1.4-.4-.4-.6-.9-.6-1.4 0-1.1.9-2 2-2h2.5A5.5 5.5 0 0 0 21 8.7C20.4 5.4 16.6 3 12 3z"/><circle cx="7.5" cy="10.5" r="1.2"/><circle cx="12" cy="7.5" r="1.2"/><circle cx="16.5" cy="10.5" r="1.2"/></svg>
+        <span>Акцентный цвет</span><span class="set-val" id="set-accent-val"><i class="acc-dot"></i>Синий</span>
+      </button>
+    </div>
+    <div class="set-section">Учёба</div>
+    <div class="set-card">
+      <button class="set-row" id="set-model">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 6.1L20 11l-6.1 1.9L12 19l-1.9-6.1L4 11l6.1-1.9z"/></svg>
+        <span>Модель по умолчанию</span><span class="set-val" id="set-model-val">авто</span>
+      </button>
+      <button class="set-row" id="set-voice">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 10v4M12 7v10M16 10v4M4 11v2M20 11v2"/></svg>
+        <span>Голосовой ввод</span><span class="set-val" id="set-voice-val">авто</span>
+      </button>
+      <button class="set-row" id="set-speak">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10v4h3l4 4V6L7 10z"/><path d="M15 9.5a4 4 0 0 1 0 5M17.5 7a7 7 0 0 1 0 10"/></svg>
+        <span>Озвучивать ответы</span><span class="set-val" id="set-speak-val">выкл</span>
+      </button>
+      <button class="set-row" id="set-haptics">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="3" width="8" height="18" rx="2.5"/><path d="M4 9v6M20 9v6"/></svg>
+        <span>Вибро-отклик</span><span class="set-val" id="set-haptics-val">вкл</span>
+      </button>
+    </div>
+    <div class="set-section">Данные</div>
+    <div class="set-card">
+      <button class="set-row" id="set-data">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.2 7.8-8 9-4.8-1.2-8-4.5-8-9V6z"/></svg>
+        <span>Как хранятся данные</span><span class="set-chev"></span>
+      </button>
+      <button class="set-row set-danger" id="btn-wipe">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg>
+        <span>Стереть мою историю</span><span class="set-chev"></span>
+      </button>
+    </div>
+    <div class="set-card set-about">
+      <div class="set-row set-row-static">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.8v.4"/></svg>
+        <span>Сперанский AI</span><span class="set-val" id="set-version">20260920a</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- как хранятся данные -->
+<div id="data-sheet" class="sheet" hidden>
+  <div class="sheet-back"></div>
+  <div class="sheet-body data-body">
+    <h1>Твои данные</h1>
+    <div class="data-row">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/></svg>
+      <div><b>История — только твоя</b><small>Чаты лежат в закрытой базе Supabase и видны лишь тебе из твоего Telegram.</small></div>
+    </div>
+    <div class="data-row">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h10v10H7z" transform="rotate(45 12 12)"/><path d="M12 8.5v7M8.5 12h7"/></svg>
+      <div><b>Ключи моделей — на сервере</b><small>В приложение ключи не попадают: запросы идут через сервер бота.</small></div>
+    </div>
+    <div class="data-row">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="M4.5 17l5-4.5 4 3.5 3-2.5 3 3"/></svg>
+      <div><b>Фото задания — только для ответа</b><small>Снимок уходит модели, чтобы понять условие, и не используется больше нигде.</small></div>
+    </div>
+    <button id="data-ok" class="white-pill">Понятно, поехали</button>
+  </div>
+</div>
+
+<!-- меню чата (карточка у правого верхнего угла) -->
+<div id="menu-scrim" class="menu-scrim" hidden></div>
+<div id="chat-menu" class="chat-menu" hidden role="menu">
+  <div class="cm-title" id="cm-title">Чат</div>
+  <button class="cm-row" id="cm-share" role="menuitem"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M6 11H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-1"/></svg><span>Поделиться</span></button>
+  <button class="cm-row" id="cm-pin" role="menuitem"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4h6l-1 7 3 3v2H7v-2l3-3z"/><path d="M12 16v5"/></svg><span id="cm-pin-tx">Закрепить</span></button>
+  <button class="cm-row" id="cm-project" role="menuitem"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 7a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></svg><span>Добавить в проект</span><span class="cm-chev"></span></button>
+  <button class="cm-row" id="cm-files" role="menuitem"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11.5 12.3 19a5 5 0 0 1-7-7l8.5-8.4a3.3 3.3 0 0 1 4.7 4.7L9.4 15.8a1.7 1.7 0 0 1-2.4-2.4l7.8-7.7"/></svg><span>Загруженные файлы</span></button>
+  <button class="cm-row" id="cm-find" role="menuitem"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg><span>Найти в чате</span></button>
+  <button class="cm-row" id="cm-archive" role="menuitem"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="4" rx="1.2"/><path d="M5 8.5V18a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5M10 12.5h4"/></svg><span>Архивировать</span></button>
+  <button class="cm-row cm-danger" id="cm-delete" role="menuitem"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg><span>Удалить</span></button>
+</div>
+
+<!-- файлы чата -->
+<div id="files-sheet" class="sheet" hidden>
+  <div class="sheet-back"></div>
+  <div class="sheet-body files-body">
+    <div class="sheet-head"><span>Файлы чата</span>
+      <button class="icon-btn sheet-close" aria-label="Закрыть"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <div id="files-list" class="files-list"></div>
+  </div>
+</div>
+
+<!-- поиск в чате -->
+<div id="find-sheet" class="sheet" hidden>
+  <div class="sheet-back"></div>
+  <div class="sheet-body files-body">
+    <div class="sheet-head">
+      <input id="find-input" class="find-input" placeholder="Найти в чате…">
+      <button class="icon-btn sheet-close" aria-label="Закрыть"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <div id="find-list" class="files-list"></div>
+  </div>
+</div>
+
+<!-- голосовой режим -->
+<div id="voice-overlay" class="voice-overlay" hidden>
+  <div class="vo-head">
+    <button id="vo-close-top" class="round-btn" title="Свернуть" aria-label="Свернуть"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9.5h16M4 14.5h11"/></svg></button>
+    <span class="vo-title">Голосовой режим</span>
+    <button id="vo-settings" class="round-btn" title="Настройки голоса" aria-label="Настройки голоса"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 8h10M18 8h2M4 16h4M12 16h8"/><circle cx="16" cy="8" r="2.2"/><circle cx="10" cy="16" r="2.2"/></svg></button>
+  </div>
+  <div class="vo-stage">
+    <div class="orb" id="orb" aria-hidden="true">
+      <i class="orb-a"></i><i class="orb-b"></i><i class="orb-c"></i>
+    </div>
+    <div class="vo-status" id="vo-status">нажми микрофон и говори</div>
+  </div>
+  <div class="vo-foot">
+    <div class="vo-text" id="vo-text">Спроси Сперанского…</div>
+    <button id="vo-mic" class="vo-mic" title="Говорить" aria-label="Говорить">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/></svg>
+    </button>
+    <button id="vo-close" class="vo-x" title="Выйти" aria-label="Выйти"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+</div>
+
 <script>
-window.__NEED_APP_V = '20260918a';
+window.__NEED_APP_V = '20260920a';
 window.addEventListener('load', function () {
   if (window.__APP_V !== window.__NEED_APP_V) {
     var k = 'bust-' + window.__NEED_APP_V;
@@ -123,5 +286,5 @@ window.addEventListener('load', function () {
   }
 });
 </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3b52d4eb8e4098e',t:'MTc4OTQ0OTU3MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</body>
 </html>
