@@ -7,7 +7,7 @@
    Render несёт Telegram initData, подпись проверяется сервером.
    ============================================================ */
 'use strict';
-window.__APP_V = '20260920a';
+window.__APP_V = '20260921a';
 // iOS WKWebView не умеет стриминговое чтение fetch — там сразу просим целиком
 const NO_STREAM = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -78,6 +78,7 @@ const state = {
   accent: 'blue',         // blue | violet | green | orange
   haptics: true,
   speak: false,           // озвучивать ответы
+  voContinue: true,       // голосовой чат: слушать снова после ответа
   voicePref: 'auto',      // auto | live | record
   pins: [],               // закреплённые чаты
   quota: null,            // {left_day, unlimited} с сервера
@@ -1042,6 +1043,7 @@ function startLiveRec(btn) {
         if (t) finalText += (finalText ? ' ' : '') + t;
       } else interim += (res[0].transcript || '');
     }
+    if (voOpen) { voHear(finalText, interim); return; }   // голосовой чат
     inp.value = [base, finalText, interim.trim()].filter(Boolean).join(' ');
     autosize();
   };
@@ -1051,6 +1053,7 @@ function startLiveRec(btn) {
     stopLiveRec(btn);
     if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
       warn('Нет доступа к микрофону: разреши в настройках или напиши текстом.');
+      if (voOpen) { setVoMood('idle'); setVoStatus('нет доступа к микрофону — разреши в настройках'); }
       return;
     }
     if (wasRec && !liveFellBack) {
@@ -1099,6 +1102,7 @@ async function startRecordRec(btn) {
       recorder = new MediaRecorder(stream);
     } catch (e2) {
       warn('Микрофон недоступен: разреши доступ или напиши текстом.');
+      if (voOpen) { setVoMood('idle'); setVoStatus('микрофон недоступен — разреши доступ'); }
       return;
     }
   }
@@ -1124,9 +1128,10 @@ async function startRecordRec(btn) {
     const b64 = await blobToB64(blob);
     warn('Распознаю голосовое…');
     try {
-      const j = await api('POST', '/api/transcribe',
-                          { audio: b64, mime: blob.type || 'audio/webm', partial: false });
-      const inp = $('#input');
+    const j = await api('POST', '/api/transcribe',
+                        { audio: b64, mime: blob.type || 'audio/webm', partial: false });
+    if (voOpen) { voSubmitText(j.text || ''); warn(''); $('#warn').hidden = true; return; }
+    const inp = $('#input');
       inp.value = [recBase, (j.text || '').trim()].filter(Boolean).join(' ');
       autosize();
       inp.focus();
@@ -1247,6 +1252,7 @@ function loadPrefs() {
   state.haptics = p.haptics !== false;
   state.speak = !!p.speak;
   state.voicePref = p.voicePref || 'auto';
+  state.voContinue = p.voContinue !== false;
   state.pins = Array.isArray(p.pins) ? p.pins : [];
 }
 function savePrefs() {
@@ -1254,6 +1260,7 @@ function savePrefs() {
     localStorage.setItem(PREFS_KEY, JSON.stringify({
       theme: state.theme, accent: state.accent, haptics: state.haptics,
       speak: state.speak, voicePref: state.voicePref, pins: state.pins,
+      voContinue: state.voContinue,
     }));
   } catch (e) { /* приватный режим — не страшно */ }
 }
@@ -1363,7 +1370,8 @@ async function send(opts = {}) {
   const lastU = regen && state.current
     ? state.current.messages[state.current.messages.length - 1]
     : null;
-  const text = regen ? ((lastU && lastU.content) || '') : input.value.trim();
+  const text = regen ? ((lastU && lastU.content) || '')
+    : (opts.text != null ? String(opts.text) : input.value.trim());
   if (!text && !(regen && lastU && lastU.image)) return;
   if (!INIT_DATA) return showFatal('Нет данных Telegram. Открой приложение из чата с ботом.');
   try {
@@ -1380,8 +1388,7 @@ async function send(opts = {}) {
   if (!regen) {
     cur.messages.push({ role: 'user', content: text, image: img || undefined });
     clearAttach();
-    input.value = '';
-    autosize();
+    if (opts.text == null) { input.value = ''; autosize(); }
     if (cur.title === 'Новый чат') {
       cur.title = text.slice(0, 40) + (text.length > 40 ? '…' : '');
       updateHead();
@@ -1517,19 +1524,32 @@ const ACCENTS = [['blue', 'Синий'], ['violet', 'Фиолетовый'],
                  ['green', 'Зелёный'], ['orange', 'Оранжевый']];
 const VOICE_PREFS = [['auto', 'авто'], ['live', 'live'], ['record', 'запись']];
 
+const ONOFF = (v) => (v ? 'Вкл' : 'Выкл');
+
 function renderSettings() {
   const th = THEMES.find((t) => t[0] === state.theme) || THEMES[0];
   const ac = ACCENTS.find((a) => a[0] === state.accent) || ACCENTS[0];
   const vp = VOICE_PREFS.find((v) => v[0] === state.voicePref) || VOICE_PREFS[0];
   $('#set-theme-val').textContent = th[1];
   $('#set-accent-val').innerHTML = '<i class="acc-dot"></i>' + ac[1];
-  $('#set-voice-val').textContent = vp[1];
-  $('#set-speak-val').textContent = state.speak ? 'вкл' : 'выкл';
-  $('#set-haptics-val').textContent = state.haptics ? 'вкл' : 'выкл';
+  $('#set-voice-val').textContent = vp[1][0].toUpperCase() + vp[1].slice(1);
+  $('#set-speak-val').textContent = ONOFF(state.speak);
+  $('#set-haptics-val').textContent = ONOFF(state.haptics);
+  const cv = $('#set-cont-val');
+  if (cv) cv.textContent = ONOFF(state.voContinue);
   $('#set-model-val').textContent = state.current && state.current.provider
-    ? shortModel(state.current.model) : 'авто';
+    ? shortModel(state.current.model) : 'Авто';
   const v = $('#set-version');
   if (v) v.textContent = __APP_V;
+  /* секция владельца: статистика проекта */
+  const statsCard = $('#set-stats');
+  if (statsCard) {
+    const owner = !!(state.quota && state.quota.unlimited);
+    statsCard.hidden = !owner;
+    const sec = $('#set-stats-sec');
+    if (sec) sec.hidden = !owner;
+    if (owner) loadStats();
+  }
   /* профиль из Telegram initData */
   const u = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
   const name = u ? [u.first_name, u.last_name].filter(Boolean).join(' ') : '';
@@ -1658,14 +1678,20 @@ function openVoice() {
   $('#voice-overlay').hidden = false;
   const t = ($('#input').value || '').trim();
   $('#vo-text').textContent = t || 'Спроси Сперанского…';
-  setVoStatus(recorder || liveRec ? 'слушаю…' : 'нажми микрофон и говори');
+  setVoMood('idle');
+  setVoStatus('подключаю микрофон…');
   haptic('light');
+  setTimeout(() => { if (voOpen && voMode === 'idle') voStartListen(); }, 300);
 }
 function closeVoice() {
   voOpen = false;
-  if (recorder) { try { recorder.stop(); } catch (e) {} }
+  if (voSilence) { clearTimeout(voSilence); voSilence = 0; }
+  voFinal = '';
+  try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) { /* ок */ }
+  if (recorder) { try { recorder.stop(); } catch (e) { /* ок */ } }
   if (liveRec) stopLiveRec($('#vo-mic'));
   stopOrb();
+  setVoMood('idle');
   setVoStatus('нажми микрофон и говори');
   $('#voice-overlay').hidden = true;
 }
@@ -1712,6 +1738,163 @@ function stopOrb() {
   if (audioCtx) { try { audioCtx.close(); } catch (e) {} audioCtx = null; analyser = null; }
 }
 
+/* ---- голосовой чат: слушаю → думаю → отвечаю вслух → слушаю снова ----
+   Как в голосовом режиме ChatGPT: разговор руками не трогается, ответ
+   озвучивается, сферу можно тапнуть, чтобы перебить или встать на паузу. */
+let voMode = 'idle';        // idle | listen | think | speak
+let voFinal = '';
+let voSeen = 0;
+let voSilence = 0;
+
+function setVoMood(m) {
+  voMode = m;
+  const orb = $('#orb');
+  if (!orb) return;
+  orb.classList.remove('m-think', 'm-speak');
+  if (m === 'think') orb.classList.add('m-think');
+  if (m === 'speak') orb.classList.add('m-speak');
+}
+
+function voStartListen() {
+  if (!voOpen || liveRec || recorder) return;
+  setVoMood('listen');
+  voFinal = '';
+  voSeen = 0;
+  const btn = $('#vo-mic');
+  const okLive = state.voicePref !== 'record' && !!LiveSR && !liveFellBack;
+  if (okLive && startLiveRec(btn)) return;
+  startRecordRec(btn);      // фолбэк: запись + whisper, фраза кончится тапом
+}
+
+function voStopListen() {
+  const btn = $('#vo-mic');
+  if (liveRec) {
+    const r = liveRec;
+    liveRec = null;
+    try { r.onend = null; r.stop(); } catch (e) { /* уже остановлен */ }
+    btn.classList.remove('rec');
+    stopOrb();
+  }
+  if (voSilence) { clearTimeout(voSilence); voSilence = 0; }
+}
+
+function voHear(cumFinal, interim) {
+  if (voMode !== 'listen') return;
+  if (cumFinal.length > voSeen) {
+    voFinal += (voFinal ? ' ' : '') + cumFinal.slice(voSeen).trim();
+    voSeen = cumFinal.length;
+  }
+  const line = [voFinal, (interim || '').trim()].filter(Boolean).join(' ');
+  setVoStatus(line ? '«' + line + '»' : 'слушаю… говори — текст появится сам');
+  if (voFinal) {
+    if (voSilence) clearTimeout(voSilence);
+    // пауза в речи = конец фразы: отправляем в чат сами
+    voSilence = setTimeout(() => { voSilence = 0; voSubmit(); }, 1200);
+  }
+}
+
+function voSubmitText(t) {          // пришёл из записи+whisper
+  if (!voOpen) return;
+  const text = (t || '').trim();
+  if (!text) {
+    setVoMood('idle');
+    setVoStatus('не расслышал — нажми микрофон и говори');
+    return;
+  }
+  voFinal = text;
+  voSubmit();
+}
+
+async function voSubmit() {
+  const text = voFinal.trim();
+  voFinal = '';
+  voSeen = 0;
+  if (!voOpen) return;
+  if (!text) { voStartListen(); return; }
+  voStopListen();
+  setVoMood('think');
+  setVoStatus('думаю…');
+  try { await send({ text }); } catch (e) { /* warn уже показан */ }
+  if (!voOpen) return;
+  const msgs = state.current ? state.current.messages : [];
+  const last = msgs[msgs.length - 1];
+  voSpeak(last && last.role === 'assistant' ? last.content : '');
+}
+
+function speechPlain(t) {
+  return (t || '')
+    .replace(/\$\$[\s\S]*?\$\$/g, ' формула ')
+    .replace(/\$[^$\n]*\$/g, ' формула ')
+    .replace(/```[\s\S]*?```/g, ' пример кода ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/[#*_>`|]/g, ' ')
+    .replace(/\s+/g, ' ').trim().slice(0, 700);
+}
+
+function voSpeak(text) {
+  const plain = speechPlain(text);
+  const syn = window.speechSynthesis;
+  if (!voOpen) return;
+  if (!syn || !plain) { voAfter(); return; }
+  try { syn.cancel(); } catch (e) { /* нечего отменять */ }
+  const u = new SpeechSynthesisUtterance(plain);
+  u.lang = 'ru-RU';
+  u.rate = 1.04;
+  u.onstart = () => {
+    if (!voOpen) return;
+    setVoMood('speak');
+    setVoStatus('говорю… тапни сферу, чтобы перебить');
+  };
+  u.onend = () => { if (voOpen) voAfter(); };
+  u.onerror = () => { if (voOpen) voAfter(); };
+  setVoMood('speak');
+  syn.speak(u);
+}
+
+function voAfter() {
+  if (!voOpen) return;
+  if (state.voContinue) {
+    voStartListen();
+    if (voMode === 'listen') setVoStatus('слушаю…');
+  } else {
+    setVoMood('idle');
+    setVoStatus('нажми микрофон и говори');
+  }
+}
+
+function voTapOrb() {
+  haptic('light');
+  if (voMode === 'speak') {                 // перебить ответ
+    try { window.speechSynthesis.cancel(); } catch (e) { /* нет syn */ }
+    voAfter();
+    return;
+  }
+  if (voMode === 'listen') {
+    if (recorder) {                         // запись+whisper: тап = конец фразы
+      try { recorder.stop(); } catch (e) { /* уже остановлен */ }
+      return;
+    }
+    voStopListen();                         // пауза в live-режиме
+    setVoMood('idle');
+    setVoStatus('пауза — тапни сферу, чтобы продолжить');
+    return;
+  }
+  voStartListen();                          // idle → слушаю
+}
+
+function voMicTap() {
+  if (!voOpen) { toggleRec($('#vo-mic')); return; }
+  if (voMode === 'listen') {
+    if (recorder) { try { recorder.stop(); } catch (e) { /* уже */ } return; }
+    voStopListen();
+    if (voFinal) { voSubmit(); return; }    // тап = договорил, отправить сейчас
+    setVoMood('idle');
+    setVoStatus('нажми микрофон и говори');
+    return;
+  }
+  voStartListen();
+}
+
 /* ================= квота запросов ================= */
 async function loadQuota() {
   try {
@@ -1720,6 +1903,23 @@ async function loadQuota() {
     state.quota = null;   // старый сервер без квот — просто не показываем
   }
   renderQuota();
+}
+
+/* статистика проекта: сколько всего пользователей и кто заходил сегодня.
+   Сервер считает по живым initData, эндпоинт отдаёт только владельцу. */
+async function loadStats() {
+  const tEl = $('#set-stat-total');
+  const dEl = $('#set-stat-today');
+  const qEl = $('#set-stat-quota');
+  if (qEl) qEl.textContent = '∞ без лимитов';
+  try {
+    const j = await api('GET', '/api/stats');
+    if (tEl) tEl.textContent = String(j.total != null ? j.total : '—');
+    if (dEl) dEl.textContent = String(j.today != null ? j.today : '—');
+  } catch (e) {
+    if (tEl) tEl.textContent = '—';
+    if (dEl) dEl.textContent = '—';
+  }
 }
 function renderQuota() {
   const pill = $('#quota-pill');
@@ -1888,6 +2088,11 @@ async function boot() {
     if (!state.speak && window.speechSynthesis) window.speechSynthesis.cancel();
     savePrefs(); renderSettings(); hapticSel();
   };
+  const cont = $('#set-cont');
+  if (cont) cont.onclick = () => {
+    state.voContinue = !state.voContinue;
+    savePrefs(); renderSettings(); hapticSel();
+  };
   $('#set-haptics').onclick = () => {
     state.haptics = !state.haptics;
     savePrefs(); renderSettings(); hapticSel();
@@ -1962,11 +2167,14 @@ async function boot() {
 
   /* ---- голосовой оверлей ---- */
   const voMic = $('#vo-mic');
-  voMic.onclick = () => toggleRec(voMic);
+  voMic.onclick = () => voMicTap();
+  $('#orb').onclick = () => voTapOrb();
   $('#vo-close').onclick = () => closeVoice();
   $('#vo-close-top').onclick = () => closeVoice();
-  $('#vo-settings').onclick = () =>
-    warn('Тонкая настройка голоса — скоро. Сейчас: тап по микрофону = говорить.');
+  $('#vo-settings').onclick = () => {
+    closeVoice();
+    openSheet('#settings-sheet');
+  };
 
   if (state.chats.length) {
     try { await openChat(state.chats[0].id); } catch (e) { paintMessages(); }

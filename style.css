@@ -706,6 +706,8 @@ body { display: flex; flex-direction: column; }
 .set-body { top: 12vh; border-radius: 28px 28px 0 0; background: var(--sheet);
   backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
   overflow-y: auto; padding: 12px 0 calc(20px + env(safe-area-inset-bottom, 0px)); }
+/* flex-контейнер не должен сплющивать карточки при длинном списке */
+.set-body > * { flex-shrink: 0; }
 .set-close { position: absolute; top: 14px; right: 14px; z-index: 2;
   background: var(--group); }
 .set-profile { display: flex; flex-direction: column; align-items: center;
@@ -844,6 +846,18 @@ body { display: flex; flex-direction: column; }
   animation: orb-drift 7s ease-in-out infinite; }
 .orb-c { background: radial-gradient(circle at 26% 62%, rgba(255,255,255,.5) 0%, rgba(255,255,255,0) 42%);
   animation: orb-drift 9s ease-in-out infinite reverse; }
+/* настроения сферы: думаю / говорю (слушаю = .live с реакцией на голос) */
+.orb.m-think { animation: orb-think 3s ease-in-out infinite;
+  filter: blur(.5px) saturate(.72) brightness(.9); }
+.orb.m-think .orb-a { animation: orb-spin 3.6s linear infinite; }
+.orb.m-think .orb-b { animation: orb-spin 5.2s linear infinite reverse; }
+.orb.m-think .orb-c { animation: orb-spin 4.4s linear infinite; }
+.orb.m-speak { animation: orb-speak .85s ease-in-out infinite;
+  filter: blur(.5px) saturate(1.18); }
+.orb.m-speak .orb-b { animation: orb-drift 1.6s ease-in-out infinite; }
+@keyframes orb-spin { to { transform: rotate(360deg); } }
+@keyframes orb-think { 0%, 100% { transform: scale(.965); } 50% { transform: scale(1); } }
+@keyframes orb-speak { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
 @keyframes orb-drift { 0%,100% { transform: translate(0,0) scale(1); }
   50% { transform: translate(4%, -3%) scale(1.06); } }
 .orb.live { animation: none; }

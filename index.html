@@ -153,25 +153,47 @@
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1.4 0 2.2-.9 2.2-2 0-.6-.2-1-.6-1.4-.4-.4-.6-.9-.6-1.4 0-1.1.9-2 2-2h2.5A5.5 5.5 0 0 0 21 8.7C20.4 5.4 16.6 3 12 3z"/><circle cx="7.5" cy="10.5" r="1.2"/><circle cx="12" cy="7.5" r="1.2"/><circle cx="16.5" cy="10.5" r="1.2"/></svg>
         <span>Акцентный цвет</span><span class="set-val" id="set-accent-val"><i class="acc-dot"></i>Синий</span>
       </button>
+      <button class="set-row" id="set-haptics">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="3" width="8" height="18" rx="2.5"/><path d="M4 9v6M20 9v6"/></svg>
+        <span>Вибро-отклик</span><span class="set-val" id="set-haptics-val">Вкл</span>
+      </button>
+    </div>
+    <div class="set-section">Голос</div>
+    <div class="set-card">
+      <button class="set-row" id="set-voice">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 10v4M12 7v10M16 10v4M4 11v2M20 11v2"/></svg>
+        <span>Микрофон</span><span class="set-val" id="set-voice-val">Авто</span>
+      </button>
+      <button class="set-row" id="set-speak">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10v4h3l4 4V6L7 10z"/><path d="M15 9.5a4 4 0 0 1 0 5M17.5 7a7 7 0 0 1 0 10"/></svg>
+        <span>Озвучивать ответы</span><span class="set-val" id="set-speak-val">Выкл</span>
+      </button>
+      <button class="set-row" id="set-cont">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 0 1 13.6-5.7M20 12a8 8 0 0 1-13.6 5.7"/><path d="M17.6 3.6v2.8h-2.8M6.4 20.4v-2.8h2.8"/></svg>
+        <span>Непрерывный диалог</span><span class="set-val" id="set-cont-val">Вкл</span>
+      </button>
     </div>
     <div class="set-section">Учёба</div>
     <div class="set-card">
       <button class="set-row" id="set-model">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 6.1L20 11l-6.1 1.9L12 19l-1.9-6.1L4 11l6.1-1.9z"/></svg>
-        <span>Модель по умолчанию</span><span class="set-val" id="set-model-val">авто</span>
+        <span>Модель по умолчанию</span><span class="set-val" id="set-model-val">Авто</span>
       </button>
-      <button class="set-row" id="set-voice">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 10v4M12 7v10M16 10v4M4 11v2M20 11v2"/></svg>
-        <span>Голосовой ввод</span><span class="set-val" id="set-voice-val">авто</span>
-      </button>
-      <button class="set-row" id="set-speak">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10v4h3l4 4V6L7 10z"/><path d="M15 9.5a4 4 0 0 1 0 5M17.5 7a7 7 0 0 1 0 10"/></svg>
-        <span>Озвучивать ответы</span><span class="set-val" id="set-speak-val">выкл</span>
-      </button>
-      <button class="set-row" id="set-haptics">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="3" width="8" height="18" rx="2.5"/><path d="M4 9v6M20 9v6"/></svg>
-        <span>Вибро-отклик</span><span class="set-val" id="set-haptics-val">вкл</span>
-      </button>
+    </div>
+    <div class="set-section" id="set-stats-sec" hidden>Проект</div>
+    <div class="set-card" id="set-stats" hidden>
+      <div class="set-row set-row-static">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11a3 3 0 1 0 6 0 3 3 0 0 0-6 0z"/><path d="M4 20c.8-3.2 3.2-5 8-5s7.2 1.8 8 5"/><circle cx="17.5" cy="8.5" r="2.2"/><circle cx="6.5" cy="8.5" r="2.2"/></svg>
+        <span>Всего пользователей</span><span class="set-val" id="set-stat-total">—</span>
+      </div>
+      <div class="set-row set-row-static">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>
+        <span>Заходили сегодня</span><span class="set-val" id="set-stat-today">—</span>
+      </div>
+      <div class="set-row set-row-static">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.2 7.8-8 9-4.8-1.2-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg>
+        <span>Мой лимит</span><span class="set-val" id="set-stat-quota">∞ без лимитов</span>
+      </div>
     </div>
     <div class="set-section">Данные</div>
     <div class="set-card">
@@ -286,5 +308,5 @@ window.addEventListener('load', function () {
   }
 });
 </script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3b678fe7a0149b7',t:'MTc4OTQ2MzE1Nw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
