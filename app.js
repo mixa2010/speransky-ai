@@ -7,7 +7,7 @@
    Render несёт Telegram initData, подпись проверяется сервером.
    ============================================================ */
 'use strict';
-window.__APP_V = '20260921c';
+window.__APP_V = '20260921e';
 // iOS WKWebView не умеет стриминговое чтение fetch — там сразу просим целиком
 const NO_STREAM = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -955,6 +955,10 @@ function startThinking(bubble) {
       const tx = bubble.querySelector('.think-txt');
       if (tx) tx.firstChild.textContent = 'ответ длинный, всё ещё думаю… ';
     }
+    if (sec === 75) {
+      const tx = bubble.querySelector('.think-txt');
+      if (tx) tx.firstChild.textContent = 'долго: модель с фото думает или сеть медленная — можно остановить стоп-кнопкой и повторить ';
+    }
   }, 1000);
 }
 function stopThinking() {
@@ -1333,7 +1337,7 @@ async function _readStreamInner(res, reader, bubble) {
 async function chatRequest(cur, bubble) {
   state.abortCtl = new AbortController();
   let timedOut = false;
-  let silence = setTimeout(() => { timedOut = true; state.abortCtl.abort(); }, 120000);
+  let silence = setTimeout(() => { timedOut = true; state.abortCtl.abort(); }, 95000);
   let res;
   let att = 0;
   for (;;) {
@@ -1351,7 +1355,7 @@ async function chatRequest(cur, bubble) {
     } catch (e) {
       if (timedOut) {
         clearTimeout(silence);
-        throw Object.assign(new Error('сервер молчит >120 секунд'), { code: 504 });
+        throw Object.assign(new Error('сервер молчит >95 секунд'), { code: 504 });
       }
       const net = /Load failed|Failed to fetch|NetworkError|network/i
         .test(String(e && e.message));
@@ -1370,7 +1374,7 @@ async function chatRequest(cur, bubble) {
       state.abortCtl = new AbortController();
       timedOut = false;
       clearTimeout(silence);
-      silence = setTimeout(() => { timedOut = true; state.abortCtl.abort(); }, 120000);
+      silence = setTimeout(() => { timedOut = true; state.abortCtl.abort(); }, 95000);
     }
   }
   clearTimeout(silence);
@@ -1523,7 +1527,7 @@ async function send(opts = {}) {
     pending.textContent = '⚠️ ' + (e.code === 401
       ? 'Сессия протухла: закрой и открой приложение заново.'
       : e.code === 504
-        ? 'Сервер молчит больше 120 секунд. Попробуй ещё раз или проверь интернет.'
+        ? 'Сервер молчит больше 95 секунд. Нажми «Повторить» или проверь связь.'
         : e.net
           ? 'Сеть (LTE/WebView) сорвала запрос — я дважды повторил, не вышло. ' +
             'Нажми «Повторить» или проверь связь.'
