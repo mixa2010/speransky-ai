@@ -14,7 +14,7 @@ const NO_STREAM = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
 
 const DEFAULT_API = 'https://homework-bot-6h3b.onrender.com';
 const _params = new URLSearchParams(location.search);
-const API_BASE = (_params.get('api') || DEFAULT_API).replace(/\/+$/, '');
+const API_BASE = DEFAULT_API.replace(/\/+$/, '');
 const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : null;
 const INIT_DATA = (tg && tg.initData) || _params.get('initData') || '';
 
