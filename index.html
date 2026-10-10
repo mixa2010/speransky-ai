@@ -15,9 +15,9 @@
         crossorigin="anonymous"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"
         crossorigin="anonymous"></script>
-<script defer src="app.js?v=20261010a"></script>
+<script defer src="app.js?v=20261010b"></script>
 
-<link rel="stylesheet" href="style.css?v=20261010a">
+<link rel="stylesheet" href="style.css?v=20261010b">
 </head>
 <body>
 
@@ -67,13 +67,6 @@
   <button id="attach-remove" class="icon-btn" title="Убрать фото" aria-label="Убрать фото"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
 </div>
 
-<div id="rec-bar" class="rec-bar" hidden>
-  <span class="rec-dot" aria-hidden="true"></span>
-  <span id="rec-time" class="rec-time">0:00</span>
-  <span class="rec-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
-  <span class="rec-hint">запись — нажми микрофон ещё раз, чтобы остановить</span>
-</div>
-
 <footer id="composer" class="composer" hidden>
   <div class="composer-pill">
     <button id="btn-attach" class="plain-btn" title="Фото задания" aria-label="Фото задания">
@@ -81,12 +74,6 @@
     </button>
     <input id="file-input" type="file" accept="image/*" hidden>
     <textarea id="input" rows="1" placeholder="Спроси Сперанского…"></textarea>
-    <button id="btn-mic" class="plain-btn" title="Голосовой ввод" aria-label="Голосовой ввод">
-      <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/></svg>
-    </button>
-    <button id="btn-voice" class="voice-btn" title="Голосовой режим" aria-label="Голосовой режим">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><path d="M8 10v4M12 7v10M16 10v4"/></svg>
-    </button>
     <button id="btn-send" class="send-btn" title="Отправить" aria-label="Отправить"><span id="send-ico"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V6M6 12l6-6 6 6"/></svg></span></button>
   </div>
 </footer>
@@ -156,21 +143,6 @@
       <button class="set-row" id="set-haptics">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="3" width="8" height="18" rx="2.5"/><path d="M4 9v6M20 9v6"/></svg>
         <span>Вибро-отклик</span><span class="set-val" id="set-haptics-val">Вкл</span>
-      </button>
-    </div>
-    <div class="set-section">Голос</div>
-    <div class="set-card">
-      <button class="set-row" id="set-voice">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 10v4M12 7v10M16 10v4M4 11v2M20 11v2"/></svg>
-        <span>Микрофон</span><span class="set-val" id="set-voice-val">Авто</span>
-      </button>
-      <button class="set-row" id="set-speak">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10v4h3l4 4V6L7 10z"/><path d="M15 9.5a4 4 0 0 1 0 5M17.5 7a7 7 0 0 1 0 10"/></svg>
-        <span>Озвучивать ответы</span><span class="set-val" id="set-speak-val">Выкл</span>
-      </button>
-      <button class="set-row" id="set-cont">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 0 1 13.6-5.7M20 12a8 8 0 0 1-13.6 5.7"/><path d="M17.6 3.6v2.8h-2.8M6.4 20.4v-2.8h2.8"/></svg>
-        <span>Непрерывный диалог</span><span class="set-val" id="set-cont-val">Вкл</span>
       </button>
     </div>
     <div class="set-section">Учёба</div>
@@ -272,30 +244,8 @@
   </div>
 </div>
 
-<!-- голосовой режим -->
-<div id="voice-overlay" class="voice-overlay" hidden>
-  <div class="vo-head">
-    <button id="vo-close-top" class="round-btn" title="Свернуть" aria-label="Свернуть"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9.5h16M4 14.5h11"/></svg></button>
-    <span class="vo-title">Голосовой режим</span>
-    <button id="vo-settings" class="round-btn" title="Настройки голоса" aria-label="Настройки голоса"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 8h10M18 8h2M4 16h4M12 16h8"/><circle cx="16" cy="8" r="2.2"/><circle cx="10" cy="16" r="2.2"/></svg></button>
-  </div>
-  <div class="vo-stage">
-    <div class="orb" id="orb" aria-hidden="true">
-      <i class="orb-a"></i><i class="orb-b"></i><i class="orb-c"></i>
-    </div>
-    <div class="vo-status" id="vo-status">нажми микрофон и говори</div>
-  </div>
-  <div class="vo-foot">
-    <div class="vo-text" id="vo-text">Спроси Сперанского…</div>
-    <button id="vo-mic" class="vo-mic" title="Говорить" aria-label="Говорить">
-      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/></svg>
-    </button>
-    <button id="vo-close" class="vo-x" title="Выйти" aria-label="Выйти"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-  </div>
-</div>
-
 <script>
-window.__NEED_APP_V = '20261010a';
+window.__NEED_APP_V = '20261010b';
 window.addEventListener('load', function () {
   if (window.__APP_V !== window.__NEED_APP_V) {
     var k = 'bust-' + window.__NEED_APP_V;

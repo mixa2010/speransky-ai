@@ -84,10 +84,12 @@ body { display: flex; flex-direction: column; }
         align-items: center; justify-content: center; gap: 14px; }
 .boot-spark { width: 44px; height: 44px; fill: var(--accent);
   filter: drop-shadow(0 0 14px color-mix(in srgb, var(--accent) 55%, transparent));
-  animation: spark-pulse 1.6s var(--ease) infinite; }
-@keyframes spark-pulse {
-  0%, 100% { transform: scale(1); opacity: .85; }
-  50% { transform: scale(1.12); opacity: 1; }
+  transform-origin: center;
+  animation: boot-mark-in 600ms var(--ease) both; }
+@keyframes boot-mark-in {
+  0% { opacity: .72; transform: scale(.88) rotate(-8deg); }
+  70% { opacity: 1; transform: scale(1.06) rotate(2deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0); }
 }
 .boot-text { color: var(--hint); font-size: 14px; letter-spacing: .02em; }
 
@@ -222,7 +224,7 @@ body { display: flex; flex-direction: column; }
   object-fit: contain; background: #fff; border: 1px solid var(--hair); padding: 1px;
 }
 
-/* действия под ответом: ряд мини-иконок, как в больших чат-ботах */
+/* действия под ответом: копирование / перегенерация / поделиться */
 .retry-btn {
   margin: 10px 2px 0; padding: 8px 18px; border: 0; border-radius: 999px;
   background: var(--accent); color: var(--accent-tx);
@@ -242,7 +244,6 @@ body { display: flex; flex-direction: column; }
 .act-btn:hover { color: var(--text); background: var(--group); }
 .act-btn:active { transform: scale(.9); }
 .act-btn svg { width: 17px; height: 17px; vertical-align: 0; }
-.act-btn.on { color: var(--accent); }
 
 /* фото в пузыре */
 .msg-img { max-width: 250px; width: 100%; border-radius: var(--r-md);
@@ -323,38 +324,6 @@ body { display: flex; flex-direction: column; }
 .attach-preview img { width: 64px; height: 64px; object-fit: cover;
   border-radius: 14px; border: 1px solid var(--hair); }
 
-/* ---------------- индикатор записи голоса ---------------- */
-.rec-bar {
-  position: sticky; bottom: 74px; z-index: 26;
-  display: flex; gap: 10px; align-items: center;
-  max-width: 860px; width: fit-content; margin: 0 auto; padding: 9px 16px;
-  background: var(--glass-2);
-  border: 1px solid color-mix(in srgb, #ff5c5c 45%, var(--hair));
-  border-radius: 999px;
-  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 6px 20px rgba(255, 92, 92, .12);
-  animation: pop-in .22s var(--ease);
-}
-.rec-dot { width: 10px; height: 10px; flex: 0 0 10px; border-radius: 50%;
-  background: #ff5c5c; animation: rec-blink 1.1s ease-in-out infinite; }
-@keyframes rec-blink { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
-.rec-time { font-family: var(--mono); font-size: 13px; color: var(--text);
-  min-width: 36px; }
-.rec-wave { display: inline-flex; gap: 3px; align-items: center; height: 16px; }
-.rec-wave i { width: 3px; height: 35%; border-radius: 2px; background: #ff5c5c;
-  opacity: .85; animation: rec-wave .9s ease-in-out infinite; }
-.rec-wave i:nth-child(2) { animation-delay: .12s; }
-.rec-wave i:nth-child(3) { animation-delay: .24s; }
-.rec-wave i:nth-child(4) { animation-delay: .36s; }
-.rec-wave i:nth-child(5) { animation-delay: .48s; }
-.rec-wave i:nth-child(6) { animation-delay: .6s; }
-.rec-wave i:nth-child(7) { animation-delay: .72s; }
-.rec-wave i:nth-child(8) { animation-delay: .84s; }
-.rec-wave i:nth-child(9) { animation-delay: .96s; }
-@keyframes rec-wave { 0%, 100% { height: 30%; } 50% { height: 100%; } }
-.rec-hint { color: var(--hint); font-size: 12px; }
-@media (max-width: 480px) { .rec-hint { display: none; } }
-
 /* ---------------- композер (стеклянная пилюля) ---------------- */
 .composer {
   position: sticky; bottom: 0; z-index: 30;
@@ -385,17 +354,6 @@ body { display: flex; flex-direction: column; }
   transition: transform .18s var(--ease), color .18s var(--ease);
 }
 .plain-btn:active { transform: scale(.9); }
-.plain-btn.rec { color: #ff5c5c; animation: rec-pulse 1.2s ease-in-out infinite; }
-.voice-btn {
-  border: 0; border-radius: 999px; width: 34px; height: 34px; flex: 0 0 34px;
-  background: var(--accent); color: var(--accent-tx); cursor: pointer;
-  display: inline-flex; align-items: center; justify-content: center;
-  margin-bottom: 1px;
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 40%, transparent);
-  transition: transform .18s var(--ease);
-}
-.voice-btn:active { transform: scale(.9); }
-.composer.has-text .voice-btn { display: none; }
 .composer:not(.has-text) .send-btn { display: none; }
 .send-btn {
   border: 0; border-radius: 999px; width: 34px; height: 34px; flex: 0 0 34px;
@@ -597,15 +555,11 @@ body { display: flex; flex-direction: column; }
 .vis-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
   background: var(--ok); box-shadow: 0 0 6px var(--ok); }
 .icon-btn svg { vertical-align: -3px; }
-.attach-btn.rec { color: #ff5c5c; border-color: #ff5c5c;
-  animation: rec-pulse 1.2s ease-in-out infinite; }
-@keyframes rec-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,92,92,.35); }
-  50% { box-shadow: 0 0 0 8px rgba(255,92,92,0); } }
 #send-ico { display: inline-flex; }
 
 /* ============================================================
    РЕДАКЦИЯ 20260920a: язык крупных чат-ботов
-   (drawer, груп-карточки настроек, меню чата, голосовая сфера)
+   (drawer, груп-карточки настроек, меню чата)
    ============================================================ */
 
 :root {
@@ -827,72 +781,10 @@ body { display: flex; flex-direction: column; }
 .find-row b { color: var(--accent); }
 .find-row small { display: block; color: var(--hint); font-size: 12px; margin-top: 2px; }
 
-/* ---------------- голосовой режим и сфера ---------------- */
-.voice-overlay {
-  position: fixed; inset: 0; z-index: 70; background: #000;
-  display: flex; flex-direction: column;
-  animation: fade-in .25s var(--ease);
-}
-.vo-head { display: flex; align-items: center; justify-content: space-between;
-  padding: calc(12px + env(safe-area-inset-top, 0px)) 14px 8px; }
-.vo-head .round-btn { background: rgba(255, 255, 255, .1); color: #fff; }
-.vo-title { color: rgba(255, 255, 255, .55); font-size: 13px; font-weight: 650;
-  letter-spacing: .02em; }
-.vo-stage { flex: 1; display: flex; flex-direction: column; align-items: center;
-  justify-content: center; gap: 34px; }
-.orb { position: relative; width: min(58vw, 250px); aspect-ratio: 1;
-  border-radius: 999px; overflow: hidden;
-  background: linear-gradient(180deg, #8a97f8 0%, #b9c1fb 55%, #e8ebfa 100%);
-  filter: blur(.5px);
-  animation: orb-breathe 4.2s ease-in-out infinite; }
-@keyframes orb-breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.045); } }
-.orb i { position: absolute; inset: -12%; border-radius: 999px; }
-.orb-a { background: radial-gradient(circle at 40% 26%, rgba(109,124,246,.9) 0%, rgba(125,139,247,.55) 40%, rgba(125,139,247,0) 74%); }
-.orb-b { background: radial-gradient(circle at 62% 82%, rgba(255,255,255,.95) 0%, rgba(238,240,251,.6) 26%, rgba(238,240,251,0) 58%);
-  animation: orb-drift 7s ease-in-out infinite; }
-.orb-c { background: radial-gradient(circle at 26% 62%, rgba(255,255,255,.5) 0%, rgba(255,255,255,0) 42%);
-  animation: orb-drift 9s ease-in-out infinite reverse; }
-/* настроения сферы: думаю / говорю (слушаю = .live с реакцией на голос) */
-.orb.m-think { animation: orb-think 3s ease-in-out infinite;
-  filter: blur(.5px) saturate(.72) brightness(.9); }
-.orb.m-think .orb-a { animation: orb-spin 3.6s linear infinite; }
-.orb.m-think .orb-b { animation: orb-spin 5.2s linear infinite reverse; }
-.orb.m-think .orb-c { animation: orb-spin 4.4s linear infinite; }
-.orb.m-speak { animation: orb-speak .85s ease-in-out infinite;
-  filter: blur(.5px) saturate(1.18); }
-.orb.m-speak .orb-b { animation: orb-drift 1.6s ease-in-out infinite; }
-@keyframes orb-spin { to { transform: rotate(360deg); } }
-@keyframes orb-think { 0%, 100% { transform: scale(.965); } 50% { transform: scale(1); } }
-@keyframes orb-speak { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
-@keyframes orb-drift { 0%,100% { transform: translate(0,0) scale(1); }
-  50% { transform: translate(4%, -3%) scale(1.06); } }
-.orb.live { animation: none; }
-.vo-status { color: rgba(255, 255, 255, .5); font-size: 14px; }
-.vo-foot { display: flex; align-items: center; gap: 10px;
-  padding: 10px 14px calc(14px + env(safe-area-inset-bottom, 0px)); }
-.vo-text { flex: 1; background: rgba(255, 255, 255, .08); border-radius: 999px;
-  color: rgba(255, 255, 255, .75); font-size: 14.5px; padding: 11px 16px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vo-mic { width: 46px; height: 46px; flex: 0 0 46px; border: 0; border-radius: 999px;
-  background: rgba(255, 255, 255, .1); color: #fff; cursor: pointer;
-  display: inline-flex; align-items: center; justify-content: center;
-  transition: transform .18s var(--ease), background .18s var(--ease); }
-.vo-mic:active { transform: scale(.92); }
-.vo-mic.rec { background: #ff453a; animation: rec-pulse 1.2s ease-in-out infinite; }
-.vo-x { width: 46px; height: 46px; flex: 0 0 46px; border: 0; border-radius: 999px;
-  background: #fff; color: #000; cursor: pointer;
-  display: inline-flex; align-items: center; justify-content: center;
-  transition: transform .18s var(--ease); }
-.vo-x:active { transform: scale(.92); }
-
-/* ---------------- десктоп: drawer и сфера ---------------- */
+/* ---------------- desktop drawer ---------------- */
 @media (min-width: 700px) {
   .drawer-body { width: 340px; }
   .chat-menu { top: 60px; }
-  .voice-overlay { background: rgba(0, 0, 0, .92); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .orb, .orb-b, .orb-c, .drawer-body, .chat-menu { animation: none !important; }
 }
 
 /* подсветка найденного сообщения */
