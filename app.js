@@ -7,7 +7,7 @@
    Render несёт Telegram initData, подпись проверяется сервером.
    ============================================================ */
 'use strict';
-window.__APP_V = '20261010a';
+window.__APP_V = '20261010b';
 // iOS WKWebView не умеет стриминговое чтение fetch — там сразу просим целиком
 const NO_STREAM = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -17,6 +17,7 @@ const _params = new URLSearchParams(location.search);
 const API_BASE = DEFAULT_API.replace(/\/+$/, '');
 const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : null;
 const INIT_DATA = (tg && tg.initData) || _params.get('initData') || '';
+const VOICE_DISABLED_MESSAGE = 'Голосовой ввод отключён — напишите запрос текстом';
 
 const $ = (s) => document.querySelector(s);
 
@@ -77,9 +78,6 @@ const state = {
   theme: 'system',        // system | dark | light
   accent: 'blue',         // blue | violet | green | orange
   haptics: true,
-  speak: false,           // озвучивать ответы
-  voContinue: true,       // голосовой чат: слушать снова после ответа
-  voicePref: 'auto',      // auto | live | record
   pins: [],               // закреплённые чаты
   quota: null,            // {left_day, unlimited} с сервера
   chatFilter: '',         // фильтр списка чатов в drawer
@@ -114,6 +112,11 @@ async function api(method, path, body) {
     throw Object.assign(new Error('unauthorized'), { code: 401 });
   }
   if (!res.ok) {
+    if (res.status === 410 && data.error === 'voice_disabled') {
+      warn(VOICE_DISABLED_MESSAGE);
+      throw Object.assign(new Error(VOICE_DISABLED_MESSAGE),
+                          { code: 410, voiceDisabled: true });
+    }
     throw Object.assign(new Error(data.error || ('HTTP ' + res.status)),
                         { code: res.status });
   }
@@ -516,7 +519,6 @@ function buildActions(text, canRegen) {
     return b;
   };
   mk('', 'Скопировать ответ', IC.copy, () => { haptic('light'); copyText(text); });
-  mk('act-speak', 'Прочитать вслух', IC.speak, (b) => toggleSpeak(text, b));
   if (canRegen) {
     mk('act-regen', 'Перегенерировать ответ', IC.regen, () => {
       hapticSel(); regenerateLast();
@@ -530,28 +532,6 @@ function shareText(text) {
   const t = String(text || '').slice(0, 4000);
   if (navigator.share) { navigator.share({ text: t }).catch(() => {}); return; }
   copyText(t);
-}
-
-/* озвучка ответа системным синтезом речи; повторный тап — стоп */
-function toggleSpeak(text, btn) {
-  const syn = window.speechSynthesis;
-  if (!syn) { warn('Озвучка недоступна в этом браузере.'); return; }
-  if (btn && btn.classList.contains('on')) {
-    syn.cancel();
-    btn.classList.remove('on');
-    return;
-  }
-  document.querySelectorAll('.act-speak.on').forEach((b) => b.classList.remove('on'));
-  syn.cancel();
-  const u = new SpeechSynthesisUtterance(
-    String(text || '').replace(/[#*`_>|\\[\]]/g, ' ').slice(0, 3000));
-  u.lang = 'ru-RU';
-  const off = () => { if (btn) btn.classList.remove('on'); };
-  u.onend = off;
-  u.onerror = off;
-  if (btn) btn.classList.add('on');
-  haptic('light');
-  syn.speak(u);
 }
 
 /* кнопка «заново» имеет смысл только у последнего ответа —
@@ -826,7 +806,6 @@ const CATS = [
   { id: 'image', title: 'Генерация изображений', short: 'Картинки',
     icon: 'catImage', soon: true },
   { id: 'video', title: 'Генерация видео', short: 'Видео', icon: 'catVideo', soon: true },
-  { id: 'audio', title: 'Аудио и озвучка', short: 'Аудио', icon: 'catAudio', soon: true },
 ];
 
 function modelRow(m) {
@@ -861,7 +840,7 @@ function modelRow(m) {
   return row;
 }
 
-/* Вкладки категорий: Текст / Код / Картинки / Видео / Аудио */
+/* Вкладки категорий: Текст / Код / Картинки / Видео */
 function renderModelTabs() {
   const box = $('#model-tabs');
   if (!box) return;
@@ -969,217 +948,6 @@ function stopThinking() {
   if (state.thinkTimer) { clearInterval(state.thinkTimer); state.thinkTimer = null; }
 }
 
-/* ================= голос: живой ввод =================
-   Два режима, выбираются автоматически:
-   1) Живое распознавание (Web Speech API) — обычные браузеры:
-      говоришь, текст появляется в строке ввода сразу.
-   2) Запись (MediaRecorder) + серверное распознавание Groq whisper —
-      работает везде, включая Telegram WebView. Во время записи каждые
-      ~2.5 с накопленное аудио частично уходит на /api/transcribe,
-      поэтому текст дописывается в строку, пока ещё говоришь. */
-let recorder = null;
-let recChunks = [];
-let recTimer = null;
-let recBase = '';          // текст, бывший в строке до записи
-let partialBusy = false;
-let partialAt = 0;
-let liveRec = null;
-let liveFellBack = false;
-const LiveSR = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-function showRecBar(hint) {
-  if (voOpen) {           // в голосовом оверлее свой статус, rec-бар не нужен
-    setVoStatus(hint || 'слушаю…');
-    return;
-  }
-  const bar = $('#rec-bar');
-  if (!bar) return;
-  const h = bar.querySelector('.rec-hint');
-  if (h && hint) h.textContent = hint;
-  bar.hidden = false;
-  const t0 = Date.now();
-  const el = $('#rec-time');
-  const tick = () => {
-    const s = Math.floor((Date.now() - t0) / 1000);
-    if (el) el.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
-  };
-  tick();
-  recTimer = setInterval(tick, 500);
-}
-
-function hideRecBar() {
-  if (recTimer) { clearInterval(recTimer); recTimer = null; }
-  const bar = $('#rec-bar');
-  if (bar) bar.hidden = true;
-  if (voOpen) setVoStatus('нажми микрофон и говори');
-}
-
-function blobToB64(blob) {
-  return new Promise((res) => {
-    const r = new FileReader();
-    r.onload = () => res(String(r.result).split(',')[1] || '');
-    r.readAsDataURL(blob);
-  });
-}
-
-async function toggleRec(btn) {
-  if (liveRec) { stopLiveRec(btn); return; }
-  if (recorder) { recorder.stop(); return; }
-  if (state.voicePref === 'live') liveFellBack = false;   // вторая попытка live
-  const wantLive = state.voicePref !== 'record' && !!LiveSR && !liveFellBack;
-  if (wantLive && startLiveRec(btn)) return;
-  await startRecordRec(btn);
-}
-
-/* --- режим 1: живое распознавание в браузере --- */
-function startLiveRec(btn) {
-  let r;
-  try { r = new LiveSR(); } catch (e) { return false; }
-  liveRec = r;
-  const inp = $('#input');
-  const base = (inp.value || '').trim();
-  let finalText = '';
-  r.lang = 'ru-RU';
-  r.continuous = true;
-  r.interimResults = true;
-  r.onresult = (ev) => {
-    let interim = '';
-    for (let i = ev.resultIndex; i < ev.results.length; i++) {
-      const res = ev.results[i];
-      if (res.isFinal) {
-        const t = (res[0].transcript || '').trim();
-        if (t) finalText += (finalText ? ' ' : '') + t;
-      } else interim += (res[0].transcript || '');
-    }
-    if (voOpen) { voHear(finalText, interim); return; }   // голосовой чат
-    inp.value = [base, finalText, interim.trim()].filter(Boolean).join(' ');
-    autosize();
-  };
-  r.onerror = (ev) => {
-    if (ev.error === 'no-speech' || ev.error === 'aborted') return;
-    const wasRec = btn.classList.contains('rec');
-    stopLiveRec(btn);
-    if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
-      warn('Нет доступа к микрофону: разреши в настройках или напиши текстом.');
-      if (voOpen) { setVoMood('idle'); setVoStatus('нет доступа к микрофону — разреши в настройках'); }
-      return;
-    }
-    if (wasRec && !liveFellBack) {
-      // живое распознавание в этом окружении не работает — запись + whisper
-      liveFellBack = true;
-      startRecordRec(btn);
-      return;
-    }
-    warn('Распознавание остановилось (' + ev.error + ').');
-  };
-  r.onend = () => {
-    // браузеры обрывают длинные сессии — перезапускаем, пока идёт запись
-    if (liveRec === r && btn.classList.contains('rec')) {
-      try { r.start(); } catch (e) { /* дождёмся следующего onend */ }
-    }
-  };
-  try { r.start(); } catch (e) { liveRec = null; return false; }
-  btn.classList.add('rec');
-  if (voOpen) startOrb(null);
-  showRecBar('слушаю… говори — текст появится сам');
-  haptic('light');
-  return true;
-}
-
-function stopLiveRec(btn) {
-  if (!liveRec) return;
-  const r = liveRec;
-  liveRec = null;
-  try { r.onend = null; r.stop(); } catch (e) { /* уже остановлен */ }
-  btn.classList.remove('rec');
-  stopOrb();
-  hideRecBar();
-  haptic('light');
-  const inp = $('#input');
-  if ((inp.value || '').trim()) { autosize(); inp.focus(); }
-}
-
-/* --- режим 2: запись + серверное распознавание с частичными отправками --- */
-async function startRecordRec(btn) {
-  let stream;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-  } catch (e) {
-    try {
-      recorder = new MediaRecorder(stream);
-    } catch (e2) {
-      warn('Микрофон недоступен: разреши доступ или напиши текстом.');
-      if (voOpen) { setVoMood('idle'); setVoStatus('микрофон недоступен — разреши доступ'); }
-      return;
-    }
-  }
-  recChunks = [];
-  partialBusy = false;
-  partialAt = Date.now();
-  recBase = ($('#input').value || '').trim();
-  recorder.ondataavailable = (ev) => {
-    if (ev.data && ev.data.size) {
-      recChunks.push(ev.data);
-      sendPartial();
-    }
-  };
-  recorder.onstop = async () => {
-    const blob = new Blob(recChunks, { type: recorder.mimeType || 'audio/webm' });
-    recorder.stream.getTracks().forEach((t) => t.stop());
-    recorder = null;
-    btn.classList.remove('rec');
-    stopOrb();
-    hideRecBar();
-    haptic('light');
-    if (!blob.size) return;
-    const b64 = await blobToB64(blob);
-    warn('Распознаю голосовое…');
-    try {
-    const j = await api('POST', '/api/transcribe',
-                        { audio: b64, mime: blob.type || 'audio/webm', partial: false });
-    if (voOpen) { voSubmitText(j.text || ''); warn(''); $('#warn').hidden = true; return; }
-    const inp = $('#input');
-      inp.value = [recBase, (j.text || '').trim()].filter(Boolean).join(' ');
-      autosize();
-      inp.focus();
-      warn('');
-      $('#warn').hidden = true;
-    } catch (e) {
-      warn('Не распознал: ' + e.message + '. Напиши текстом.');
-    }
-  };
-  recorder.start(1000);   // куски раз в секунду — нужны для частичных отправок
-  btn.classList.add('rec');
-  if (voOpen) startOrb(stream);
-  showRecBar('говори — текст появится по мере распознавания');
-  haptic('light');
-}
-
-/* Частичное распознавание: раз в ≥2.5 с отправляем всё накопленное аудио
-   и обновляем строку ввода. Ошибки молча глотаются — финальное
-   распознавание после остановки всё догонит. */
-async function sendPartial() {
-  if (!recorder || partialBusy) return;
-  const now = Date.now();
-  if (now - partialAt < 2500) return;
-  const blob = new Blob(recChunks, { type: recorder.mimeType || 'audio/webm' });
-  if (blob.size < 5000) return;   // меньше секунды звука — рано
-  partialAt = now;
-  partialBusy = true;
-  try {
-    const b64 = await blobToB64(blob);
-    const j = await api('POST', '/api/transcribe',
-                        { audio: b64, mime: blob.type || 'audio/webm', partial: true });
-    const inp = $('#input');
-    if (recorder && j.text && j.text.trim()) {
-      inp.value = [recBase, j.text.trim()].filter(Boolean).join(' ');
-      autosize();
-    }
-  } catch (e) { /* тихо: финальное распознавание покроет всё */ }
-  partialBusy = false;
-}
-
 /* ================= фото задания ================= */
 function clearAttach() {
   state.pendingImage = null;
@@ -1214,13 +982,11 @@ const IC = {
   send: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M3.4 20.6 21 12 3.4 3.4l2.4 7.2L15 12l-9.2 1.4z"/></svg>',
   stop: '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>',
   clip: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M20 11.5 12.3 19a5 5 0 0 1-7-7l8.5-8.4a3.3 3.3 0 0 1 4.7 4.7L9.4 15.8a1.7 1.7 0 0 1-2.4-2.4l7.8-7.7"/></svg>',
-  mic: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/></svg>',
   x: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   catText: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/></svg>',
   catCode: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 7 3.5 12 8 17M16 7l4.5 5L16 17"/></svg>',
   catImage: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="M4.5 17.5 10 12l4 4 3-3 2.5 2.5"/></svg>',
   catVideo: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="6" width="12" height="12" rx="2.5"/><path d="M15.5 10.5 20.5 8v8l-5-2.5z"/></svg>',
-  catAudio: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4"/></svg>',
   lock: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2.5"/><path d="M8 10V7.5a4 4 0 0 1 8 0V10"/></svg>',
   copy: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>',
   regen: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4.5h-4.5"/></svg>',
@@ -1228,7 +994,6 @@ const IC = {
   check: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5 5L20 6.5"/></svg>',
   dots: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>',
   sparkO: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 6.1L20 11l-6.1 1.9L12 19l-1.9-6.1L4 11l6.1-1.9z"/></svg>',
-  speak: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10v4h3l4 4V6L7 10z"/><path d="M15 9.5a4 4 0 0 1 0 5M17.5 7a7 7 0 0 1 0 10"/></svg>',
   shareIc: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M6 11H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-1"/></svg>',
   sparkFill: '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M12 3l1.9 6.1L20 11l-6.1 1.9L12 19l-1.9-6.1L4 11l6.1-1.9z"/></svg>',
   bulb: '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6M10 21h4M12 3a6.5 6.5 0 0 1 4 11.6c-.7.6-1 1.4-1 2.4h-6c0-1-.3-1.8-1-2.4A6.5 6.5 0 0 1 12 3z"/></svg>',
@@ -1258,17 +1023,13 @@ function loadPrefs() {
   state.theme = p.theme || 'system';
   state.accent = p.accent || 'blue';
   state.haptics = p.haptics !== false;
-  state.speak = !!p.speak;
-  state.voicePref = p.voicePref || 'auto';
-  state.voContinue = p.voContinue !== false;
   state.pins = Array.isArray(p.pins) ? p.pins : [];
 }
 function savePrefs() {
   try {
     localStorage.setItem(PREFS_KEY, JSON.stringify({
       theme: state.theme, accent: state.accent, haptics: state.haptics,
-      speak: state.speak, voicePref: state.voicePref, pins: state.pins,
-      voContinue: state.voContinue,
+      pins: state.pins,
     }));
   } catch (e) { /* приватный режим — не страшно */ }
 }
@@ -1351,7 +1112,7 @@ async function chatRequest(cur, bubble) {
     bubble.classList.remove('streaming');
     bubble.innerHTML = '<span class="dots"><i></i><i></i><i></i></span>';
     delete bubble.__acc;        // хвост оборванного стрима всплыть не должен
-    if (!voOpen) haptic('light');
+    haptic('light');
     await new Promise((r) => setTimeout(r, delay));
     if (state.abortCtl.signal.aborted && !timedOut) {
       const err = new Error('остановлено');
@@ -1501,7 +1262,6 @@ async function send(opts = {}) {
       state.quota.left_day -= 1;
       renderQuota();
     }
-    if (state.speak && r.reply) toggleSpeak(r.reply, null);
     if (r.fallbacks && r.fallbacks.length &&
         (r.provider !== cur.provider || r.model !== cur.model)) {
       const from = r.fallbacks[r.fallbacks.length - 1];
@@ -1603,34 +1363,23 @@ function autosize() {
   const i = $('#input');
   i.style.height = 'auto';
   i.style.height = Math.min(i.scrollHeight, 140) + 'px';
-  /* композер меняет правую кнопку: волна → отправка */
+  /* Кнопка отправки появляется, когда в поле есть текст. */
   const c = $('#composer');
   if (c) c.classList.toggle('has-text', !!i.value.trim());
-  const vo = $('#vo-text');
-  if (vo && !$('#voice-overlay').hidden) {
-    vo.textContent = i.value.trim() || 'Спроси Сперанского…';
-  }
 }
 
 /* ================= настройки (груп-карточки) ================= */
 const THEMES = [['system', 'Системное'], ['dark', 'Тёмное'], ['light', 'Светлое']];
 const ACCENTS = [['blue', 'Синий'], ['violet', 'Фиолетовый'],
                  ['green', 'Зелёный'], ['orange', 'Оранжевый']];
-const VOICE_PREFS = [['auto', 'авто'], ['live', 'live'], ['record', 'запись']];
-
 const ONOFF = (v) => (v ? 'Вкл' : 'Выкл');
 
 function renderSettings() {
   const th = THEMES.find((t) => t[0] === state.theme) || THEMES[0];
   const ac = ACCENTS.find((a) => a[0] === state.accent) || ACCENTS[0];
-  const vp = VOICE_PREFS.find((v) => v[0] === state.voicePref) || VOICE_PREFS[0];
   $('#set-theme-val').textContent = th[1];
   $('#set-accent-val').innerHTML = '<i class="acc-dot"></i>' + ac[1];
-  $('#set-voice-val').textContent = vp[1][0].toUpperCase() + vp[1].slice(1);
-  $('#set-speak-val').textContent = ONOFF(state.speak);
   $('#set-haptics-val').textContent = ONOFF(state.haptics);
-  const cv = $('#set-cont-val');
-  if (cv) cv.textContent = ONOFF(state.voContinue);
   $('#set-model-val').textContent = state.current && state.current.provider
     ? shortModel(state.current.model) : 'Авто';
   const v = $('#set-version');
@@ -1755,238 +1504,6 @@ function renderFind(q) {
     box.appendChild(row);
   });
   if (!n) box.innerHTML = '<div class="sheet-empty">Не нашлось.</div>';
-}
-
-/* ================= голосовой режим: сфера на реальном уровне ========== */
-let voOpen = false;
-let orbRaf = 0;
-let analyser = null;
-let audioCtx = null;
-
-function setVoStatus(t) {
-  const el = $('#vo-status');
-  if (el) el.textContent = t;
-}
-function openVoice() {
-  voOpen = true;
-  $('#voice-overlay').hidden = false;
-  const t = ($('#input').value || '').trim();
-  $('#vo-text').textContent = t || 'Спроси Сперанского…';
-  setVoMood('idle');
-  setVoStatus('подключаю микрофон…');
-  haptic('light');
-  setTimeout(() => { if (voOpen && voMode === 'idle') voStartListen(); }, 300);
-}
-function closeVoice() {
-  voOpen = false;
-  if (voSilence) { clearTimeout(voSilence); voSilence = 0; }
-  voFinal = '';
-  try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) { /* ок */ }
-  if (recorder) { try { recorder.stop(); } catch (e) { /* ок */ } }
-  if (liveRec) stopLiveRec($('#vo-mic'));
-  stopOrb();
-  setVoMood('idle');
-  setVoStatus('нажми микрофон и говори');
-  $('#voice-overlay').hidden = true;
-}
-function startOrb(stream) {
-  const orb = $('#orb');
-  if (!orb) return;
-  if (stream) {
-    try {
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const src = audioCtx.createMediaStreamSource(stream);
-      analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 512;
-      src.connect(analyser);
-    } catch (e) { analyser = null; }
-  }
-  orb.classList.add('live');
-  const data = analyser ? new Uint8Array(analyser.frequencyBinCount) : null;
-  const t0 = Date.now();
-  const loop = () => {
-    if (!voOpen || !orb.classList.contains('live')) return;
-    let lvl = 0;
-    if (analyser && data) {
-      analyser.getByteTimeDomainData(data);
-      let s = 0;
-      for (let i = 0; i < data.length; i++) {
-        const d = (data[i] - 128) / 128;
-        s += d * d;
-      }
-      lvl = Math.min(1, Math.sqrt(s / data.length) * 3.4);
-    } else {
-      /* live-распознавание без потока: мягкая синусоида «речи» */
-      lvl = 0.28 + 0.22 * Math.sin((Date.now() - t0) / 260);
-    }
-    orb.style.transform = 'scale(' + (1 + lvl * 0.16).toFixed(3) + ')';
-    orbRaf = requestAnimationFrame(loop);
-  };
-  loop();
-}
-function stopOrb() {
-  if (orbRaf) cancelAnimationFrame(orbRaf);
-  orbRaf = 0;
-  const orb = $('#orb');
-  if (orb) { orb.classList.remove('live'); orb.style.transform = ''; }
-  if (audioCtx) { try { audioCtx.close(); } catch (e) {} audioCtx = null; analyser = null; }
-}
-
-/* ---- голосовой чат: слушаю → думаю → отвечаю вслух → слушаю снова ----
-   Как в голосовом режиме ChatGPT: разговор руками не трогается, ответ
-   озвучивается, сферу можно тапнуть, чтобы перебить или встать на паузу. */
-let voMode = 'idle';        // idle | listen | think | speak
-let voFinal = '';
-let voSeen = 0;
-let voSilence = 0;
-
-function setVoMood(m) {
-  voMode = m;
-  const orb = $('#orb');
-  if (!orb) return;
-  orb.classList.remove('m-think', 'm-speak');
-  if (m === 'think') orb.classList.add('m-think');
-  if (m === 'speak') orb.classList.add('m-speak');
-}
-
-function voStartListen() {
-  if (!voOpen || liveRec || recorder) return;
-  setVoMood('listen');
-  voFinal = '';
-  voSeen = 0;
-  const btn = $('#vo-mic');
-  const okLive = state.voicePref !== 'record' && !!LiveSR && !liveFellBack;
-  if (okLive && startLiveRec(btn)) return;
-  startRecordRec(btn);      // фолбэк: запись + whisper, фраза кончится тапом
-}
-
-function voStopListen() {
-  const btn = $('#vo-mic');
-  if (liveRec) {
-    const r = liveRec;
-    liveRec = null;
-    try { r.onend = null; r.stop(); } catch (e) { /* уже остановлен */ }
-    btn.classList.remove('rec');
-    stopOrb();
-  }
-  if (voSilence) { clearTimeout(voSilence); voSilence = 0; }
-}
-
-function voHear(cumFinal, interim) {
-  if (voMode !== 'listen') return;
-  if (cumFinal.length > voSeen) {
-    voFinal += (voFinal ? ' ' : '') + cumFinal.slice(voSeen).trim();
-    voSeen = cumFinal.length;
-  }
-  const line = [voFinal, (interim || '').trim()].filter(Boolean).join(' ');
-  setVoStatus(line ? '«' + line + '»' : 'слушаю… говори — текст появится сам');
-  if (voFinal) {
-    if (voSilence) clearTimeout(voSilence);
-    // пауза в речи = конец фразы: отправляем в чат сами
-    voSilence = setTimeout(() => { voSilence = 0; voSubmit(); }, 1200);
-  }
-}
-
-function voSubmitText(t) {          // пришёл из записи+whisper
-  if (!voOpen) return;
-  const text = (t || '').trim();
-  if (!text) {
-    setVoMood('idle');
-    setVoStatus('не расслышал — нажми микрофон и говори');
-    return;
-  }
-  voFinal = text;
-  voSubmit();
-}
-
-async function voSubmit() {
-  const text = voFinal.trim();
-  voFinal = '';
-  voSeen = 0;
-  if (!voOpen) return;
-  if (!text) { voStartListen(); return; }
-  voStopListen();
-  setVoMood('think');
-  setVoStatus('думаю…');
-  try { await send({ text }); } catch (e) { /* warn уже показан */ }
-  if (!voOpen) return;
-  const msgs = state.current ? state.current.messages : [];
-  const last = msgs[msgs.length - 1];
-  voSpeak(last && last.role === 'assistant' ? last.content : '');
-}
-
-function speechPlain(t) {
-  return (t || '')
-    .replace(/\$\$[\s\S]*?\$\$/g, ' формула ')
-    .replace(/\$[^$\n]*\$/g, ' формула ')
-    .replace(/```[\s\S]*?```/g, ' пример кода ')
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
-    .replace(/[#*_>`|]/g, ' ')
-    .replace(/\s+/g, ' ').trim().slice(0, 700);
-}
-
-function voSpeak(text) {
-  const plain = speechPlain(text);
-  const syn = window.speechSynthesis;
-  if (!voOpen) return;
-  if (!syn || !plain) { voAfter(); return; }
-  try { syn.cancel(); } catch (e) { /* нечего отменять */ }
-  const u = new SpeechSynthesisUtterance(plain);
-  u.lang = 'ru-RU';
-  u.rate = 1.04;
-  u.onstart = () => {
-    if (!voOpen) return;
-    setVoMood('speak');
-    setVoStatus('говорю… тапни сферу, чтобы перебить');
-  };
-  u.onend = () => { if (voOpen) voAfter(); };
-  u.onerror = () => { if (voOpen) voAfter(); };
-  setVoMood('speak');
-  syn.speak(u);
-}
-
-function voAfter() {
-  if (!voOpen) return;
-  if (state.voContinue) {
-    voStartListen();
-    if (voMode === 'listen') setVoStatus('слушаю…');
-  } else {
-    setVoMood('idle');
-    setVoStatus('нажми микрофон и говори');
-  }
-}
-
-function voTapOrb() {
-  haptic('light');
-  if (voMode === 'speak') {                 // перебить ответ
-    try { window.speechSynthesis.cancel(); } catch (e) { /* нет syn */ }
-    voAfter();
-    return;
-  }
-  if (voMode === 'listen') {
-    if (recorder) {                         // запись+whisper: тап = конец фразы
-      try { recorder.stop(); } catch (e) { /* уже остановлен */ }
-      return;
-    }
-    voStopListen();                         // пауза в live-режиме
-    setVoMood('idle');
-    setVoStatus('пауза — тапни сферу, чтобы продолжить');
-    return;
-  }
-  voStartListen();                          // idle → слушаю
-}
-
-function voMicTap() {
-  if (!voOpen) { toggleRec($('#vo-mic')); return; }
-  if (voMode === 'listen') {
-    if (recorder) { try { recorder.stop(); } catch (e) { /* уже */ } return; }
-    voStopListen();
-    if (voFinal) { voSubmit(); return; }    // тап = договорил, отправить сейчас
-    setVoMood('idle');
-    setVoStatus('нажми микрофон и говори');
-    return;
-  }
-  voStartListen();
 }
 
 /* ================= квота запросов ================= */
@@ -2127,9 +1644,6 @@ async function boot() {
       send();
     }
   };
-  const micBtn = $('#btn-mic');
-  micBtn.onclick = () => toggleRec(micBtn);
-  $('#btn-voice').onclick = () => openVoice();
   const fileInput = $('#file-input');
   $('#btn-attach').onclick = () => fileInput.click();
   $('#attach-remove').onclick = () => clearAttach();
@@ -2175,21 +1689,6 @@ async function boot() {
     applyPrefs(); savePrefs(); renderSettings(); hapticSel();
   };
   $('#set-model').onclick = () => { closeSheets(); openSheet('#model-sheet'); };
-  $('#set-voice').onclick = () => {
-    const i = VOICE_PREFS.findIndex((v) => v[0] === state.voicePref);
-    state.voicePref = VOICE_PREFS[(i + 1) % VOICE_PREFS.length][0];
-    savePrefs(); renderSettings(); hapticSel();
-  };
-  $('#set-speak').onclick = () => {
-    state.speak = !state.speak;
-    if (!state.speak && window.speechSynthesis) window.speechSynthesis.cancel();
-    savePrefs(); renderSettings(); hapticSel();
-  };
-  const cont = $('#set-cont');
-  if (cont) cont.onclick = () => {
-    state.voContinue = !state.voContinue;
-    savePrefs(); renderSettings(); hapticSel();
-  };
   $('#set-haptics').onclick = () => {
     state.haptics = !state.haptics;
     savePrefs(); renderSettings(); hapticSel();
@@ -2262,17 +1761,6 @@ async function boot() {
   /* ---- поиск в чате ---- */
   $('#find-input').addEventListener('input', (e) => renderFind(e.target.value));
 
-  /* ---- голосовой оверлей ---- */
-  const voMic = $('#vo-mic');
-  voMic.onclick = () => voMicTap();
-  $('#orb').onclick = () => voTapOrb();
-  $('#vo-close').onclick = () => closeVoice();
-  $('#vo-close-top').onclick = () => closeVoice();
-  $('#vo-settings').onclick = () => {
-    closeVoice();
-    openSheet('#settings-sheet');
-  };
-
   if (state.chats.length) {
     try { await openChat(state.chats[0].id); } catch (e) { paintMessages(); }
   } else {
@@ -2290,7 +1778,7 @@ async function boot() {
 }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 120));
+  document.addEventListener('DOMContentLoaded', boot, { once: true });
 } else {
-  setTimeout(boot, 120);
+  boot();
 }
