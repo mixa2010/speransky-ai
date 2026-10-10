@@ -5,7 +5,13 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
-const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+const JS_FILES = [
+  'js/config.js', 'js/api.js', 'js/logos.js', 'js/render.js',
+  'js/icons.js', 'js/models.js', 'js/models-list.js', 'app.js',
+];
+// Все скрипты читаются в порядке загрузки из index.html (обычные скрипты
+// делят глобальную область), поэтому проверки видят весь клиент целиком.
+const app = JS_FILES.map((f) => fs.readFileSync(path.join(root, f), 'utf8')).join('\n');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'style.css'), 'utf8');
 

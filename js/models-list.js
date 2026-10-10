@@ -1,0 +1,106 @@
+/* Категории и список моделей в шторке выбора. Выделено из app.js; загружается до app.js
+   и разделяет с ним глобальную область (обычный скрипт). */
+'use strict';
+const CATS = [
+  { id: 'text', title: 'Текстовые и задачи', short: 'Текст', icon: 'catText' },
+  { id: 'code', title: 'Коддинг', short: 'Код', icon: 'catCode',
+    filter: /code|coder|codestral|leanstral|coder480b/i },
+  { id: 'image', title: 'Генерация изображений', short: 'Картинки',
+    icon: 'catImage', soon: true },
+  { id: 'video', title: 'Генерация видео', short: 'Видео', icon: 'catVideo', soon: true },
+];
+
+function modelRow(m) {
+  const row = document.createElement('div');
+  row.className = 'model-row ' + (m.state || 'ok') +
+    (state.current && state.current.provider === m.provider &&
+     state.current.model === m.model ? ' active' : '');
+  const t = document.createElement('div');
+  t.className = 'model-row-title';
+  t.innerHTML = logoHtml(m.provider) + ' ' + esc(m.model) +
+    (m.vision ? ' <span class="vis-dot" title="видит фото"></span>' : '');
+  const s2 = document.createElement('div');
+  s2.className = 'model-row-sub';
+  s2.textContent = m.provider + ' · ' + (STATE_RU[m.state] || m.state);
+  const dot = document.createElement('span');
+  dot.className = 'st-dot st-' + (m.state || 'ok');
+  dot.title = STATE_TT[m.state] || 'Статус неизвестен';
+  dot.setAttribute('aria-label', dot.title);
+  row.onclick = () => {
+    hapticSel();
+    closeSheets();                       // мгновенно, не ждём сервер
+    if (state.current) {
+      state.current.provider = m.provider;
+      state.current.model = m.model;
+      updateHead();                      // чип обновляется сразу
+      saveChatModel(state.current);      // сохранение — в фоне
+    } else {
+      createChatOptimistic(m.provider, m.model);
+    }
+  };
+  row.appendChild(t); row.appendChild(dot); row.appendChild(s2);
+  return row;
+}
+
+/* Вкладки категорий: Текст / Код / Картинки / Видео */
+function renderModelTabs() {
+  const box = $('#model-tabs');
+  if (!box) return;
+  box.innerHTML = '';
+  for (const cat of CATS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'cat-tab' + (state.modelTab === cat.id ? ' active' : '') +
+                  (cat.soon ? ' soon' : '');
+    b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', state.modelTab === cat.id ? 'true' : 'false');
+    b.innerHTML = (IC[cat.icon] || '') + '<span>' + esc(cat.short) + '</span>' +
+      (cat.soon ? '<i class="tab-lock">' + IC.lock + '</i>' : '');
+    b.onclick = () => {
+      if (state.modelTab === cat.id) return;
+      state.modelTab = cat.id;
+      haptic('light');
+      renderModelTabs();
+      renderModelsList();
+    };
+    box.appendChild(b);
+  }
+}
+
+function renderModelsList() {
+  const box = $('#models-list');
+  box.innerHTML = '';
+  const cat = CATS.find((c) => c.id === state.modelTab) || CATS[0];
+  if (cat.soon) {
+    const soon = document.createElement('div');
+    soon.className = 'soon-tile soon-tile-big tab-in';
+    soon.innerHTML = '<span class="soon-tile-ico">' + (IC[cat.icon] || '') + '</span>' +
+      '<span class="soon-tile-tx"><b>' + esc(cat.title) + '</b>' +
+      '<small>в разработке — появится в следующих обновлениях</small></span>' +
+      '<span class="soon-badge">' + IC.lock + ' скоро</span>';
+    box.appendChild(soon);
+    return;
+  }
+  const sorted = state.models.slice().sort((a, b) =>
+    (STATE_RANK[a.state] ?? 3) - (STATE_RANK[b.state] ?? 3));
+  // категория с фильтром — свои модели; без фильтра — все, кроме
+  // попавших в другие категории (иначе кодинг-модели дублируются)
+  const list = cat.filter
+    ? sorted.filter((m) => cat.filter.test(m.model))
+    : sorted.filter((m) => !CATS.some((c) => c.filter && c.filter.test(m.model)));
+  if (!list.length) {
+    const none = document.createElement('div');
+    none.className = 'soon-row';
+    none.textContent = 'В этой категории пока нет доступных моделей.';
+    box.appendChild(none);
+    return;
+  }
+  for (const m of list) box.appendChild(modelRow(m));
+  // мягкое появление списка при смене вкладки
+  box.querySelectorAll('.model-row').forEach((el, i) => {
+    el.classList.add('tab-in');
+    el.style.animationDelay = Math.min(i * 22, 220) + 'ms';
+  });
+}
+
+/* ================= оверлеи ================= */
