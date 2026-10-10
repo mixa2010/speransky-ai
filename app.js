@@ -7,7 +7,7 @@
    Render несёт Telegram initData, подпись проверяется сервером.
    ============================================================ */
 'use strict';
-window.__APP_V = '20260921f';
+window.__APP_V = '20261010a';
 // iOS WKWebView не умеет стриминговое чтение fetch — там сразу просим целиком
 const NO_STREAM = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -1342,9 +1342,31 @@ async function chatRequest(cur, bubble) {
   state.abortCtl = new AbortController();
   let timedOut = false;
   let silence = setTimeout(() => { timedOut = true; state.abortCtl.abort(); }, 95000);
-  let res;
   let att = 0;
+  /* Пауза перед повтором: возвращаем пузырёк в «ждём», перевешиваем
+     AbortController и таймер тишины. Если за это время нажали «стоп» —
+     выходим как отмена, а не молча стартуем новый запрос. */
+  async function prepareRetry(delay, partial) {
+    bubble.classList.add('pending');
+    bubble.classList.remove('streaming');
+    bubble.innerHTML = '<span class="dots"><i></i><i></i><i></i></span>';
+    delete bubble.__acc;        // хвост оборванного стрима всплыть не должен
+    if (!voOpen) haptic('light');
+    await new Promise((r) => setTimeout(r, delay));
+    if (state.abortCtl.signal.aborted && !timedOut) {
+      const err = new Error('остановлено');
+      err.name = 'AbortError';
+      err.aborted = true;
+      err.partial = partial || '';
+      throw err;
+    }
+    state.abortCtl = new AbortController();
+    timedOut = false;
+    clearTimeout(silence);
+    silence = setTimeout(() => { timedOut = true; state.abortCtl.abort(); }, 95000);
+  }
   for (;;) {
+    let res;
     try {
       res = await fetch(API_BASE + '/api/chat', {
         method: 'POST',
@@ -1355,51 +1377,63 @@ async function chatRequest(cur, bubble) {
           messages: cur.messages, stream: !NO_STREAM,
         }),
       });
-      break;
     } catch (e) {
+      clearTimeout(silence);
       if (timedOut) {
-        clearTimeout(silence);
         throw Object.assign(new Error('сервер молчит >95 секунд'), { code: 504 });
+      }
+      if (e && e.name === 'AbortError') {        // «стоп» — не сетевой сбой
+        e.aborted = true;
+        e.partial = bubble.__acc || '';
+        throw e;
       }
       const net = /Load failed|Failed to fetch|NetworkError|network/i
         .test(String(e && e.message));
       if (!net || att >= 2) {
-        clearTimeout(silence);
         throw Object.assign(
           new Error(net ? 'сеть сорвала запрос (LTE/WebView)' : String(e && e.message)),
           { code: 0, net: !!net });
       }
       att += 1;
-      bubble.classList.add('pending');
-      bubble.innerHTML = '<span class="dots"><i></i><i></i><i></i></span>';
-      await new Promise((r) => setTimeout(r, att === 1 ? 900 : 2200));
-      if (!voOpen) haptic('light');
-      state.abortCtl = new AbortController();
-      timedOut = false;
-      clearTimeout(silence);
-      silence = setTimeout(() => { timedOut = true; state.abortCtl.abort(); }, 95000);
+      await prepareRetry(att === 1 ? 900 : 2200, bubble.__acc);
+      continue;
     }
-  }
-  clearTimeout(silence);
-  const ct = res.headers.get('content-type') || '';
-  if (res.ok && ct.includes('ndjson')) {
-    try {
-      return await readStream(res, bubble);
-    } catch (e) {
-      // стрим умер посередине (особенность некоторых вебвью): повторяем
-      // запрос целиком — надёжность важнее экономии одного запроса
-      bubble.classList.add('pending');
-      bubble.innerHTML = '<span class="dots"><i></i><i></i><i></i></span>';
+    clearTimeout(silence);
+    const ct = res.headers.get('content-type') || '';
+    if (res.ok && ct.includes('ndjson')) {
+      try {
+        return await readStream(res, bubble);
+      } catch (e) {
+        /* Тело ответа уже вычитано читателем, поэтому res.json() здесь
+           ничего не даст (в лучшем случае — «body stream already read»),
+           а на сорванной сети ещё и подвиснет. Про ошибку сервера мы всё
+           равно не узнаем — единственный надёжный путь: перечитать запрос
+           целиком. Надёжность важнее одного лишнего запроса. */
+        const part = (e && e.partial) || bubble.__acc || '';
+        if (e && e.name === 'AbortError' && !timedOut) {   // явная отмена
+          e.aborted = true;
+          e.partial = part;
+          throw e;
+        }
+        if (att >= 2) {
+          throw Object.assign(new Error('связь оборвалась на середине ответа'),
+            { code: 502, net: true, streamBroken: true, partial: part });
+        }
+        att += 1;
+        await prepareRetry(att === 1 ? 900 : 2200, part);
+        continue;
+      }
     }
+    // не-стримовый ответ: тело ещё не тронуто, читаем как обычно
+    const data = res.bodyUsed ? {} : await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw Object.assign(new Error(data.error || ('HTTP ' + res.status)),
+                          { code: res.status });
+    }
+    bubble.classList.remove('pending');
+    renderRich(bubble, data.reply);
+    return data;
   }
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw Object.assign(new Error(data.error || ('HTTP ' + res.status)),
-                        { code: res.status });
-  }
-  bubble.classList.remove('pending');
-  renderRich(bubble, data.reply);
-  return data;
 }
 
 /* ================= отправка ================= */
@@ -1497,16 +1531,21 @@ async function send(opts = {}) {
   } catch (e) {
     stopThinking();
     pending.classList.remove('pending', 'streaming');
-    if (e.aborted && !e.timedOut504) {
+    if ((e.aborted && !e.timedOut504) || (e.streamBroken && e.partial)) {
       const part = e.partial || '';
+      const stopped = !!e.aborted;
       if (part) {
         renderRich(pending, part);
         const note = document.createElement('div');
         note.className = 'stop-note';
-        note.textContent = '■ остановлено — сохранил сгенерированную часть';
+        note.textContent = stopped
+          ? '■ остановлено — сохранил сгенерированную часть'
+          : '■ связь оборвалась на середине — сохранил готовую часть';
         pending.appendChild(note);
         cur.messages.push({ role: 'assistant', content: part });
-        warn('Генерацию остановили: сохранил то, что успело напечататься.');
+        warn(stopped
+          ? 'Генерацию остановили: сохранил то, что успело напечататься.'
+          : 'Ответ оборвался, повторить не удалось — дописал готовую часть.');
       } else {
         pending.remove();
         warn('Генерацию остановили.');
@@ -1955,7 +1994,10 @@ async function loadQuota() {
   try {
     state.quota = await api('GET', '/api/quota');
   } catch (e) {
-    state.quota = null;   // старый сервер без квот — просто не показываем
+    /* 404 — старый сервер без квот, пилюлю просто не показываем.
+       Сетевой сбой (code 0) — оставляем последние известные цифры,
+       чтобы пилюля не мигала при каждом провальном фоновом запросе. */
+    if (e.code !== 0) state.quota = null;
   }
   renderQuota();
 }
@@ -2239,9 +2281,11 @@ async function boot() {
   }
   loadQuota();
   /* «тёплый» пинг Render: лёгкий запрос раз в 4 минуты, чтобы бесплатная
-     инстанса не засыпала между вопросами и не подвисала на холоде */
+     инстанса не засыпала между вопросами и не подвисала на холоде.
+     Идём через api(), а не голым fetch(): так с запросом уходит initData,
+     сервер отвечает 200 вместо 401, и заодно обновляется счётчик квоты. */
   setInterval(() => {
-    if (INIT_DATA) fetch(API_BASE + '/api/quota').catch(() => {});
+    if (INIT_DATA && !state.busy) loadQuota();
   }, 240000);
 }
 
