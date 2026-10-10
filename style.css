@@ -218,7 +218,7 @@ body { display: flex; flex-direction: column; }
 
 /* мета под пузырём */
 .msg-meta { display: flex; gap: 6px; align-items: center;
-            color: var(--hint); font-size: 11.5px; padding: 2px 6px 0; }
+            color: var(--hint); font-size: 12px; padding: 2px 6px 0; }
 .msg-meta svg, .fall-chip svg, .plogo {
   width: 15px; height: 15px; border-radius: 5px; vertical-align: -2px;
   object-fit: contain; background: #fff; border: 1px solid var(--hair); padding: 1px;
@@ -434,7 +434,7 @@ body { display: flex; flex-direction: column; }
 /* ---------------- пилюля смены модели ---------------- */
 .fall-line {
   align-self: center; display: flex; flex-wrap: wrap; gap: 7px; align-items: center;
-  font-size: 11.5px; color: var(--hint);
+  font-size: 12px; color: var(--hint);
   background: var(--glass-2); border: 1px dashed var(--hair-str);
   border-radius: 999px; padding: 5px 14px; margin: 2px 0 4px;
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
@@ -510,7 +510,7 @@ body { display: flex; flex-direction: column; }
 .soon-badge { display: inline-flex; gap: 4px; align-items: center;
   color: var(--hint); font-weight: 600;
   border: 1px solid var(--hair); border-radius: 999px; padding: 2px 9px;
-  font-size: 10.5px; letter-spacing: .04em; }
+  font-size: 11.5px; letter-spacing: .04em; }
 .soon-row { color: var(--hint); font-size: 12.5px; padding: 4px 6px 8px; }
 /* мягкое появление списка при смене вкладки */
 .tab-in { animation: tab-in .28s var(--ease) both; }
@@ -539,7 +539,7 @@ body { display: flex; flex-direction: column; }
 .soon-tile-ico svg { width: 19px; height: 19px; opacity: .8; }
 .soon-tile-tx { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
 .soon-tile-tx b { color: var(--text); font-size: 13.5px; font-weight: 600; opacity: .85; }
-.soon-tile-tx small { font-size: 11.5px; }
+.soon-tile-tx small { font-size: 12px; }
 .soon-tile .soon-badge { margin: 0; flex: 0 0 auto; }
 /* крупный тизер на всю вкладку «скоро»-категории */
 .soon-tile-big {

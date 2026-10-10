@@ -1440,9 +1440,18 @@ function openFilesSheet() {
   for (const x of imgs) {
     const row = document.createElement('div');
     row.className = 'file-row';
-    row.innerHTML = '<img alt="" src="' + x.m.image + '">' +
-      '<div><div>фото к сообщению ' + (x.i + 1) + '</div>' +
-      '<small>нажми, чтобы рассмотреть</small></div>';
+    const thumb = document.createElement('img');
+    thumb.alt = '';
+    thumb.src = x.m.image;
+    const info = document.createElement('div');
+    const name = document.createElement('div');
+    name.textContent = 'фото к сообщению ' + (x.i + 1);
+    const hint = document.createElement('small');
+    hint.textContent = 'нажми, чтобы рассмотреть';
+    info.appendChild(name);
+    info.appendChild(hint);
+    row.appendChild(thumb);
+    row.appendChild(info);
     row.onclick = () => {
       haptic('light');
       box.innerHTML = '';
