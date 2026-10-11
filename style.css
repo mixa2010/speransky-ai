@@ -1,5 +1,5 @@
 /* ============================================================
-   Сперанский AI Mini App — редакция 20261011d
+   Сперанский AI Mini App — редакция 20261011e
    Что изменилось в этой редакции:
    • единый бренд-знак (буква «С» + искра) и анимированный старт;
    • шапка-двухстрочник: название чата + пилюля модели + полоса генерации;
@@ -501,6 +501,10 @@ body::before {
   justify-content: center; gap: 8px; color: var(--hint); text-align: center;
   padding: 20px 22px; overflow-y: auto;
 }
+/* на низких экранах контент приветствия не должен обрезаться сверху */
+@supports (justify-content: safe center) {
+  .empty { justify-content: safe center; }
+}
 .logo-empty { width: 58px; height: 58px; margin-bottom: 8px; animation: logo-pop .5s var(--spring) both; }
 .empty h2 { color: var(--text); font-size: 23px; margin: 6px 0 2px; letter-spacing: -.025em; font-weight: 740; }
 .empty p { font-size: 14.5px; margin: 0; line-height: 1.48; max-width: 380px; }
@@ -972,8 +976,12 @@ body::before {
   padding: 0 0 calc(22px + var(--safe-b));
 }
 .set-body > * { flex-shrink: 0; }
-.set-close { position: absolute; top: 20px; right: 14px; z-index: 2; background: var(--group); }
-.set-profile { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 30px 20px 8px; }
+/* крестик остаётся на виду, пока настройки скроллятся (sticky вместо absolute) */
+.set-close {
+  position: sticky; top: 12px; z-index: 2; background: var(--group);
+  margin: 12px 14px 0 auto;
+}
+.set-profile { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 14px 20px 8px; }
 .set-avatar {
   position: relative; width: 78px; height: 78px; border-radius: 999px;
   background: linear-gradient(140deg, var(--accent), var(--accent-2));
@@ -1179,6 +1187,14 @@ body::before {
   .sheet-grab { display: none; }
   .sheet-head { padding-top: 16px; }
   .set-body { top: 50%; }
+  /* «Твои данные» — целая страница, а не карточка: без сброса правил
+     .sheet-body поверх интерфейса висел чёрный прямоугольник с рамкой */
+  .data-body {
+    top: 0; left: 0; right: 0; bottom: 0;
+    width: auto; max-height: none; transform: none;
+    border-radius: 0; border: 0;
+    animation: fade-in .22s var(--ease);
+  }
   @keyframes sheet-pop {
     from { opacity: 0; transform: translate(-50%, -46%) scale(.97); }
     to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
