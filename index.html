@@ -15,30 +15,29 @@
         crossorigin="anonymous"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"
         crossorigin="anonymous"></script>
-<script defer src="js/config.js?v=20261011b"></script>
-<script defer src="js/api.js?v=20261011b"></script>
-<script defer src="js/logos.js?v=20261011b"></script>
-<script defer src="js/render.js?v=20261011b"></script>
-<script defer src="js/icons.js?v=20261011b"></script>
-<script defer src="js/models.js?v=20261011b"></script>
-<script defer src="js/models-list.js?v=20261011b"></script>
-<script defer src="app.js?v=20261011b"></script>
+<script defer src="js/config.js?v=20261011c"></script>
+<script defer src="js/api.js?v=20261011c"></script>
+<script defer src="js/logos.js?v=20261011c"></script>
+<script defer src="js/render.js?v=20261011c"></script>
+<script defer src="js/icons.js?v=20261011c"></script>
+<script defer src="js/models.js?v=20261011c"></script>
+<script defer src="js/models-list.js?v=20261011c"></script>
+<script defer src="app.js?v=20261011c"></script>
 
-<link rel="stylesheet" href="style.css?v=20261011b">
+<link rel="stylesheet" href="style.css?v=20261011c">
 </head>
 <body>
 
 <div id="boot" class="boot">
-  <svg class="boot-spark" viewBox="0 0 24 24" aria-hidden="true">
-    <path d="M12 1l2.6 8.4L23 12l-8.4 2.6L12 23l-2.6-8.4L1 12l8.4-2.6z"/>
-  </svg>
+  <div class="brand-word boot-word" aria-hidden="true"><span class="brand-name">Сперанский</span><span class="brand-ai">AI</span></div>
   <div class="boot-text">Сперанский AI открывается…</div>
 </div>
 
 <div id="fatal" class="fatal" hidden>
-  <div class="fatal-emoji">🤔</div>
-  <h1>Не открылось</h1>
+  <div class="fatal-emoji" id="fatal-emoji">🤔</div>
+  <h1 id="fatal-title">Не открылось</h1>
   <p id="fatal-text">Что-то пошло не так.</p>
+  <button id="fatal-subscribe" class="fatal-subscribe" hidden>Подписаться</button>
   <button id="fatal-retry" class="icon-btn fatal-retry"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4.5h-4.5"/></svg> Повторить</button>
 </div>
 
@@ -50,7 +49,7 @@
     <button id="btn-model" class="head-pill" title="Модель">модель</button>
     <span class="head-spacer"></span>
     <button id="btn-ctx" class="round-btn" title="О чате" aria-label="О чате">
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 6.1L20 11l-6.1 1.9L12 19l-1.9-6.1L4 11l6.1-1.9z"/></svg>
+      <span class="brand-mark" aria-hidden="true">С</span>
     </button>
   </div>
 </header>
@@ -59,12 +58,12 @@
 
 <main id="messages" class="messages" hidden aria-live="polite"></main>
 
+<!-- прозрачный слой: пока набираешь текст, первый тап по чату прячет клавиатуру -->
+<div id="kb-shield" class="kb-shield" hidden aria-hidden="true"></div>
+
 <div id="empty" class="empty" hidden>
-  <svg class="empty-spark" viewBox="0 0 24 24" aria-hidden="true">
-    <path d="M12 1l2.6 8.4L23 12l-8.4 2.6L12 23l-2.6-8.4L1 12l8.4-2.6z"/>
-  </svg>
   <h2 id="empty-title">Привет! Я Сперанский AI</h2>
-  <p id="empty-text">Объясняю и решаю по школьному и универу.<br>Начни с одного из действий:</p>
+  <p id="empty-text">Универсальный помощник: текст, код, объяснение, план, учёба.<br>Начни с одного из действий:</p>
   <div id="quick-actions" class="quick-actions"></div>
   <button id="btn-start-cta" class="cta-link">или выбери модель вручную</button>
 </div>
@@ -76,7 +75,7 @@
 
 <footer id="composer" class="composer" hidden>
   <div class="composer-pill">
-    <button id="btn-attach" class="plain-btn" title="Фото задания" aria-label="Фото задания">
+    <button id="btn-attach" class="plain-btn" title="Прикрепить фото" aria-label="Прикрепить фото">
       <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
     </button>
     <input id="file-input" type="file" accept="image/*" hidden>
@@ -103,6 +102,7 @@
     <div class="drawer-label">Недавние</div>
     <div id="chats-list" class="chats-list"></div>
     <div class="drawer-foot">
+      <button id="support-row" class="support-row" type="button" hidden></button>
       <span id="quota-pill" class="quota-pill" hidden></span>
       <span class="drawer-foot-row">
         <button id="btn-new" class="newchat-pill">
@@ -152,7 +152,7 @@
         <span>Вибро-отклик</span><span class="set-val" id="set-haptics-val">Вкл</span>
       </button>
     </div>
-    <div class="set-section">Учёба</div>
+    <div class="set-section">Ответы</div>
     <div class="set-card">
       <button class="set-row" id="set-model">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 6.1L20 11l-6.1 1.9L12 19l-1.9-6.1L4 11l6.1-1.9z"/></svg>
@@ -188,7 +188,7 @@
     <div class="set-card set-about">
       <div class="set-row set-row-static">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.8v.4"/></svg>
-        <span>Сперанский AI</span><span class="set-val" id="set-version">20260920a</span>
+        <span>Сперанский AI</span><span class="set-val" id="set-version">20261011c</span>
       </div>
     </div>
   </div>
@@ -209,7 +209,7 @@
     </div>
     <div class="data-row">
       <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="M4.5 17l5-4.5 4 3.5 3-2.5 3 3"/></svg>
-      <div><b>Фото задания — только для ответа</b><small>Снимок уходит модели, чтобы понять условие, и не используется больше нигде.</small></div>
+      <div><b>Фото — только для ответа</b><small>Снимок уходит модели, чтобы понять запрос, и не используется больше нигде.</small></div>
     </div>
     <button id="data-ok" class="white-pill">Понятно, поехали</button>
   </div>
@@ -252,7 +252,7 @@
 </div>
 
 <script>
-window.__NEED_APP_V = '20261011b';
+window.__NEED_APP_V = '20261011c';
 window.addEventListener('load', function () {
   if (window.__APP_V !== window.__NEED_APP_V) {
     var k = 'bust-' + window.__NEED_APP_V;
@@ -265,5 +265,5 @@ window.addEventListener('load', function () {
   }
 });
 </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3b678fe7a0149b7',t:'MTc4OTQ2MzE1Nw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</body>
 </html>

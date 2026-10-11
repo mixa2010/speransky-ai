@@ -7,7 +7,7 @@
    Render несёт Telegram initData, подпись проверяется сервером.
    ============================================================ */
 'use strict';
-window.__APP_V = '20261011b';
+window.__APP_V = '20261011c';
 const FALL_REASON = {
   rate: 'кончился лимит',
   cooldown: 'на кулдауне',
@@ -33,6 +33,7 @@ const state = {
   haptics: true,
   pins: [],               // закреплённые чаты
   quota: null,            // {left_day, unlimited} с сервера
+  policy: null,           // {free, donate_url, donate_note} из /api/boot и /api/quota
   chatFilter: '',         // фильтр списка чатов в drawer
 };
 
@@ -45,14 +46,63 @@ function warn(text) {
   warn._t = setTimeout(() => { w.hidden = true; }, 6000);
 }
 
-function showFatal(text) {
-  $('#boot').hidden = true;
-  $('#head').hidden = true;
-  $('#messages').hidden = true;
-  $('#empty').hidden = true;
-  $('#composer').hidden = true;
+/* Экран-заглушка вместо чата: ошибка, подписка или техработы.
+   Чат при этом не открывается; «Повторить» перезагружает приложение. */
+function showGate(opts) {
+  const o = opts || {};
+  for (const id of ['#boot', '#head', '#messages', '#empty', '#composer',
+                    '#attach-preview', '#kb-shield']) {
+    const el = $(id);
+    if (el) el.hidden = true;
+  }
+  closeSheets();
   $('#fatal').hidden = false;
-  $('#fatal-text').textContent = text;
+  $('#fatal-emoji').textContent = o.emoji || '🤔';
+  $('#fatal-title').textContent = o.title || 'Не открылось';
+  $('#fatal-text').textContent = o.text || 'Что-то пошло не так.';
+  const sub = $('#fatal-subscribe');
+  if (sub) {
+    sub.hidden = !o.channelUrl;
+    sub.onclick = () => { haptic('light'); openExternal(o.channelUrl); };
+  }
+}
+
+function showFatal(text) {
+  showGate({ text });
+}
+
+/* Ошибка запуска → подходящий экран. true — экран показан. */
+function gateForError(e) {
+  if (!e) return false;
+  if (e.kind === 'subscribe') {
+    showGate({ emoji: '📣', title: 'Нужна подписка', text: e.human,
+               channelUrl: e.channelUrl });
+    return true;
+  }
+  if (e.kind === 'maintenance') {
+    showGate({ emoji: '🛠', title: 'Технические работы', text: e.human });
+    return true;
+  }
+  if (e.code === 401) {
+    showGate({ title: 'Сессия не подтвердилась', text: SESSION_MESSAGE });
+    return true;
+  }
+  if (e.kind === 'forbidden') {
+    showGate({ title: 'Нет доступа',
+               text: e.human || 'Доступ закрыт. Открой приложение из чата с ботом.' });
+    return true;
+  }
+  return false;
+}
+
+/* Короткий понятный текст ошибки для пузыря/плашки. */
+function errorText(e, fallback) {
+  if (!e) return fallback;
+  if (e.code === 401) return SESSION_MESSAGE;
+  if (e.human) return e.human;
+  if (e.code === 504) return 'Сервер не ответил вовремя.';
+  if (e.net) return 'Не удалось отправить: связь мигнула.';
+  return fallback;
 }
 
 function shortModel(m) {
@@ -77,7 +127,7 @@ function updateHead() {
     const has = !!(state.current && state.current.messages.length);
     ctx.title = has ? 'Меню чата' : 'Как хранятся данные';
     ctx.setAttribute('aria-label', ctx.title);
-    ctx.innerHTML = has ? IC.dots : IC.sparkO;
+    ctx.innerHTML = has ? IC.dots : IC.brandMark;
   }
 }
 
@@ -158,6 +208,8 @@ async function copyText(t) {
   try {
     await navigator.clipboard.writeText(t);
   } catch (e) {
+    // запасной путь крадёт фокус — вернём его полю ввода, чтобы клавиатура не прыгала
+    const prev = document.activeElement;
     const ta = document.createElement('textarea');
     ta.value = t;
     ta.style.cssText = 'position:fixed;opacity:0';
@@ -165,6 +217,7 @@ async function copyText(t) {
     ta.select();
     try { document.execCommand('copy'); } catch (e2) { /* совсем без буфера */ }
     ta.remove();
+    if (prev && prev.id === 'input') { try { prev.focus({ preventScroll: true }); } catch (e3) {} }
   }
   warn('Скопировано в буфер обмена.');
 }
@@ -222,6 +275,10 @@ function regenerateLast() {
   send({ regen: true });
 }
 
+const EMPTY_TITLE = 'Привет! Я Сперанский AI';
+const EMPTY_TEXT = 'Универсальный помощник: текст, код, объяснение, план, учёба.' +
+  '<br>Начни с одного из действий:';
+
 function paintMessages() {
   const box = $('#messages');
   box.innerHTML = '';
@@ -235,6 +292,9 @@ function paintMessages() {
     et.textContent = 'Чат готов';
     ex.innerHTML = 'Модель ' + esc(shortModel(state.current.model)) +
       ' на связи. Напиши первый вопрос или прикрепи фото плюсом.';
+  } else if (et && ex && !state.current) {
+    et.textContent = EMPTY_TITLE;
+    ex.innerHTML = EMPTY_TEXT;
   }
   box.hidden = false;
   let lastBot = -1;
@@ -415,11 +475,28 @@ function pushChatToServer(cur, tempRow) {
     })
     .catch((e) => {
       state.chatReady = null;
-      warn('Не удалось создать чат на сервере: ' + e.message +
+      if (e.kind === 'chat_limit' || e.kind === 'subscribe' || e.kind === 'maintenance') {
+        dropTempChat(cur, tempRow);    // повтор не поможет — убираем черновик
+        warn(e.human);
+        throw e;
+      }
+      warn('Не удалось создать чат на сервере: ' + errorText(e, e.message) +
            ' — повторю при отправке.');
       throw e;
     });
   state.chatReady.catch(() => {});   // отловлено — ждут потребители
+}
+
+/* Черновик чата, который сервер не принял (например, лимит чатов) */
+function dropTempChat(cur, tempRow) {
+  state.chats = state.chats.filter((c) => c !== tempRow && c.id !== cur.id);
+  if (state.current === cur && !cur.messages.length) {
+    state.current = null;
+    updateHead();
+    paintMessages();
+    $('#empty').hidden = false;
+  }
+  renderChatsList();
 }
 
 /* Сохранение выбранной модели в фоне; UI к этому моменту уже обновлён */
@@ -460,8 +537,8 @@ function closeSheets() {
 }
 
 /* ================= «думает» с таймером и микрокопи ================= */
-const THINK_PHRASES = ['читаю условие…', 'строю решение…', 'сверяю вычисления…',
-                       'формулирую шаги…', 'думаю дальше…'];
+const THINK_PHRASES = ['читаю запрос…', 'обдумываю ответ…', 'проверяю детали…',
+                       'формулирую…', 'думаю дальше…'];
 function startThinking(bubble) {
   bubble.innerHTML = '<div class="think"><span class="dots"><i></i><i></i><i></i></span>' +
     '<span class="think-txt">' + THINK_PHRASES[0] + ' <b class="think-s">0с</b></span></div>';
@@ -691,10 +768,7 @@ async function chatRequest(cur, bubble) {
     }
     // не-стримовый ответ: тело ещё не тронуто, читаем как обычно
     const data = res.bodyUsed ? {} : await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw Object.assign(new Error(data.error || ('HTTP ' + res.status)),
-                          { code: res.status });
-    }
+    if (!res.ok) throw apiError(res.status, data);
     bubble.classList.remove('pending');
     renderRich(bubble, data.reply);
     return data;
@@ -720,7 +794,8 @@ async function send(opts = {}) {
       try { await state.chatReady; } catch (e) { /* повторю при сохранении */ }
     }
   } catch (e) {
-    return warn('Не удалось создать чат: ' + e.message);
+    if (e.kind === 'subscribe' || e.kind === 'maintenance') return gateForError(e);
+    return warn(e.human || ('Не удалось создать чат: ' + errorText(e, e.message)));
   }
   const cur = state.current;
   const img = regen ? ((lastU && lastU.image) || null) : state.pendingImage;
@@ -751,10 +826,17 @@ async function send(opts = {}) {
       throw e;
     }
     stopThinking();
-    const meta = document.createElement('div');
-    meta.className = 'msg-meta';
-    meta.innerHTML = logoHtml(r.provider) + ' ' + esc(r.model);
-    pending.parentNode.appendChild(meta);
+    if (r.filtered) {
+      // ответ заменён фильтром: показываем ровно то, что прислал сервер
+      pending.classList.remove('pending', 'streaming');
+      renderRich(pending, r.reply || '');
+    }
+    if (r.model) {
+      const meta = document.createElement('div');
+      meta.className = 'msg-meta';
+      meta.innerHTML = logoHtml(r.provider) + ' ' + esc(r.model);
+      pending.parentNode.appendChild(meta);
+    }
     if (r.fallbacks && r.fallbacks.length) {
       pending.parentNode.insertBefore(fallbackLine(r.fallbacks, r.provider, r.model),
                                       pending.parentNode.firstChild);
@@ -762,11 +844,11 @@ async function send(opts = {}) {
     pending.parentNode.appendChild(buildActions(r.reply || pending.__acc || '', true));
     dedupeRegen();
     scrollBottom();
-    if (state.quota && !state.quota.unlimited && state.quota.left_day > 0) {
+    if (!r.filtered && state.quota && !state.quota.unlimited && state.quota.left_day > 0) {
       state.quota.left_day -= 1;
       renderQuota();
     }
-    if (r.fallbacks && r.fallbacks.length &&
+    if (r.fallbacks && r.fallbacks.length && r.model &&
         (r.provider !== cur.provider || r.model !== cur.model)) {
       const from = r.fallbacks[r.fallbacks.length - 1];
       cur.provider = r.provider;
@@ -777,7 +859,7 @@ async function send(opts = {}) {
       api('GET', '/api/models').then((j) => { state.models = j.models || []; })
         .catch(() => {});
     }
-    cur.messages.push({ role: 'assistant', content: r.reply,
+    cur.messages.push({ role: 'assistant', content: r.reply || pending.__acc || '',
                         provider: r.provider, model: r.model,
                         fallbacks: r.fallbacks || [] });
     // на сервер история уходит с окном из 4 последних картинок,
@@ -824,13 +906,19 @@ async function send(opts = {}) {
         console.info('[diag]', d.last_chat, d.models);
       } catch (e2) { /* старый сервер без /api/debug */ }
     }
-    pending.textContent = '⚠️ ' + (e.code === 401
-      ? 'Сессия протухла: закрой и открой приложение заново.'
-      : e.code === 504
-        ? 'Сервер не ответил вовремя.'
-        : e.net
-          ? 'Не удалось отправить: связь мигнула.'
-          : 'Не получилось ответить.');
+    pending.textContent = '⚠️ ' + errorText(e, 'Не получилось ответить.');
+    if (e.kind === 'quota' && state.quota && !state.quota.unlimited) {
+      state.quota.left_day = 0;
+      renderQuota();
+    }
+    if (e.kind === 'subscribe' && e.channelUrl) {
+      const sb = document.createElement('button');
+      sb.className = 'retry-btn';
+      sb.textContent = 'Подписаться';
+      sb.onclick = () => { haptic('light'); openExternal(e.channelUrl); };
+      pending.appendChild(sb);
+      pending.appendChild(document.createTextNode(' '));
+    }
     const rb = document.createElement('button');
     rb.className = 'retry-btn';
     rb.textContent = 'Повторить';
@@ -1020,9 +1108,37 @@ function renderFind(q) {
 }
 
 /* ================= квота запросов ================= */
+/* free / donate_url / donate_note — из boot.policy или /api/quota */
+function mergePolicy(src) {
+  if (!src || typeof src !== 'object') return;
+  const p = Object.assign({}, state.policy || {});
+  let any = false;
+  for (const k of ['free', 'donate_url', 'donate_note']) {
+    if (src[k] !== undefined && src[k] !== null) { p[k] = src[k]; any = true; }
+  }
+  if (any) state.policy = p;
+}
+
+function renderSupport() {
+  const row = $('#support-row');
+  if (!row) return;
+  const p = state.policy || {};
+  const url = typeof p.donate_url === 'string' && /^https?:\/\//i.test(p.donate_url)
+    ? p.donate_url : '';
+  const note = typeof p.donate_note === 'string' ? p.donate_note.trim() : '';
+  if (!url && !p.free) { row.hidden = true; row.onclick = null; return; }
+  row.hidden = false;
+  row.classList.toggle('link', !!url);
+  row.innerHTML = esc(url ? 'Поддержать · бесплатно' : 'Бесплатно') +
+    (note ? '<small>' + esc(note) + '</small>' : '');
+  row.title = note || '';
+  row.onclick = url ? () => { haptic('light'); openExternal(url); } : null;
+}
+
 async function loadQuota() {
   try {
     state.quota = await api('GET', '/api/quota');
+    mergePolicy(state.quota);
   } catch (e) {
     /* 404 — старый сервер без квот, пилюлю просто не показываем.
        Сетевой сбой (code 0) — оставляем последние известные цифры,
@@ -1030,6 +1146,7 @@ async function loadQuota() {
     if (e.code !== 0) state.quota = null;
   }
   renderQuota();
+  renderSupport();
 }
 
 /* статистика проекта: сколько всего пользователей и кто заходил сегодня.
@@ -1065,14 +1182,14 @@ function renderQuota() {
 
 /* ================= быстрые действия на пустом экране ================= */
 const QUICK = [
-  { icon: 'solve', tx: 'Реши задачу по фото или тексту — с полным разбором',
-    put: 'Реши задачу с полным разбором по шагам: ' },
-  { icon: 'check2', tx: 'Проверь моё решение и найди ошибки',
-    put: 'Проверь моё решение, укажи ошибки и объясни их: ' },
-  { icon: 'bulb', tx: 'Объясни тему простыми словами',
+  { icon: 'pen', tx: 'Написать или разобрать текст',
+    put: 'Помоги написать или разобрать текст: ' },
+  { icon: 'check2', tx: 'Проверить текст или решение',
+    put: 'Проверь текст или решение: найди ошибки и подскажи, как исправить: ' },
+  { icon: 'bulb', tx: 'Объяснить простыми словами',
     put: 'Объясни простыми словами, с примером: ' },
-  { icon: 'cal', tx: 'Составь план подготовки к пробнику',
-    put: 'Составь план подготовки к пробнику по предмету: ' },
+  { icon: 'plan', tx: 'Составить план',
+    put: 'Составь понятный пошаговый план: ' },
 ];
 function buildQuickActions() {
   const box = $('#quick-actions');
@@ -1082,10 +1199,7 @@ function buildQuickActions() {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'qa-row';
-    const ic = q.icon === 'check2'
-      ? '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg>'
-      : IC[q.icon];
-    b.innerHTML = ic + '<span>' + esc(q.tx) + '</span>';
+    b.innerHTML = (IC[q.icon] || '') + '<span>' + esc(q.tx) + '</span>';
     b.onclick = () => {
       haptic('light');
       const inp = $('#input');
@@ -1096,6 +1210,69 @@ function buildQuickActions() {
     };
     box.appendChild(b);
   }
+}
+
+/* ================= клавиатура: первый тап по чату её прячет =================
+   В Telegram WebView первый тап по ленте при открытой клавиатуре часто
+   «съедается». Пока #input в фокусе, над лентой и пустым экраном лежит
+   прозрачный слой #kb-shield (под шапкой, композером и шторками).
+   Первое касание слоя — input.blur() и слой исчезает. Если под пальцем
+   кнопка, ссылка или поле — клавиатуру не трогаем, а передаём им тап. */
+const KB_PASS = 'button, a[href], input, textarea, select, label, summary, ' +
+  '[role="button"], [contenteditable=""], [contenteditable="true"], .composer-pill';
+
+function underShield(shield, x, y) {
+  if (typeof document.elementsFromPoint !== 'function') return null;
+  const els = document.elementsFromPoint(x, y);
+  for (const el of els) {
+    if (el === shield || shield.contains(el)) continue;
+    return el;
+  }
+  return null;
+}
+
+function pointOf(ev) {
+  const t = ev.touches && ev.touches[0] ||
+            ev.changedTouches && ev.changedTouches[0] || ev;
+  return { x: t.clientX, y: t.clientY };
+}
+
+function setupKeyboardShield(input) {
+  const shield = $('#kb-shield');
+  if (!shield || !input) return;
+  let passTo = null;          // интерактивный элемент под слоем
+  const show = () => { if (!$('#composer').hidden) shield.hidden = false; };
+  const hide = () => { shield.hidden = true; passTo = null; };
+  const onDown = (ev) => {
+    if (shield.hidden) return;
+    const p = pointOf(ev);
+    const under = underShield(shield, p.x, p.y);
+    const target = under && under.closest ? under.closest(KB_PASS) : null;
+    if (target) {
+      // кнопка/ссылка/поле: фокус не отнимаем — клик перешлём ниже
+      passTo = target;
+      if (ev.type !== 'touchstart' && ev.cancelable) ev.preventDefault();
+      return;
+    }
+    passTo = null;
+    hide();
+    input.blur();
+  };
+  shield.addEventListener('touchstart', onDown, { passive: true });
+  shield.addEventListener('pointerdown', onDown);
+  shield.addEventListener('mousedown', (ev) => { if (passTo) ev.preventDefault(); });
+  shield.addEventListener('click', (ev) => {
+    const t = passTo;
+    passTo = null;
+    if (!t) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (t.matches('input, textarea, select, [contenteditable]')) t.focus();
+    else t.click();
+  });
+  input.addEventListener('focus', show);
+  input.addEventListener('blur', hide);
+  if (document.activeElement === input) show();
 }
 
 /* ================= старт ================= */
@@ -1114,14 +1291,15 @@ async function boot() {
       const b = await api('GET', '/api/boot');
       state.models = b.models || [];
       state.chats = b.chats || [];
+      mergePolicy(b.policy);
     } catch (e) {
+      /* Подписка, техработы, сессия: сервер сказал «нет» — тихий обход
+         через /api/models и /api/chats тут не нужен, показываем экран. */
+      if (e.kind || e.code === 401 || e.code === 403) throw e;
       await Promise.all([loadModels(), loadChats()]);
     }
   } catch (e) {
-    if (e.code === 401) {
-      return showFatal('Telegram не подтвердил сессию или тебя нет в списке ' +
-        'доступа. Открой приложение заново из чата с ботом.');
-    }
+    if (gateForError(e)) return;
     return showFatal('Не удалось связаться с ботом: ' + e.message +
       '. Проверь интернет и попробуй ещё раз.');
   }
@@ -1167,6 +1345,7 @@ async function boot() {
   });
   const input = $('#input');
   input.addEventListener('input', autosize);
+  setupKeyboardShield(input);
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   });
@@ -1275,11 +1454,15 @@ async function boot() {
   $('#find-input').addEventListener('input', (e) => renderFind(e.target.value));
 
   if (state.chats.length) {
-    try { await openChat(state.chats[0].id); } catch (e) { paintMessages(); }
+    try { await openChat(state.chats[0].id); } catch (e) {
+      if (gateForError(e)) return;
+      paintMessages();
+    }
   } else {
     updateHead();
     paintMessages();
   }
+  renderSupport();
   loadQuota();
   /* «тёплый» пинг Render: лёгкий запрос раз в 4 минуты, чтобы бесплатная
      инстанса не засыпала между вопросами и не подвисала на холоде.
