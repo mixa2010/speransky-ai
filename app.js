@@ -7,7 +7,7 @@
    Render несёт Telegram initData, подпись проверяется сервером.
    ============================================================ */
 'use strict';
-window.__APP_V = '20261011c';
+window.__APP_V = '20261011d';
 const FALL_REASON = {
   rate: 'кончился лимит',
   cooldown: 'на кулдауне',
@@ -35,15 +35,33 @@ const state = {
   quota: null,            // {left_day, unlimited} с сервера
   policy: null,           // {free, donate_url, donate_note} из /api/boot и /api/quota
   chatFilter: '',         // фильтр списка чатов в drawer
+  modelQuery: '',         // поиск по списку моделей
+  stickBottom: true,      // лента приклеена к низу (пользователь не читает историю)
 };
 
+/* Шторки, которые закрываются одинаково (клик по фону, Esc, свайп). */
+const SHEETS = ['#chats-sheet', '#model-sheet', '#settings-sheet',
+                '#data-sheet', '#files-sheet', '#find-sheet'];
+
 /* ================= UI helpers ================= */
-function warn(text) {
+/* kind: 'ok' — зелёная точка подтверждения (копирование, переименование). */
+function warn(text, kind) {
   const w = $('#warn');
+  if (!w) return;
   w.hidden = false;
   w.textContent = text;
+  if (w.classList) w.classList.toggle('warn-ok', kind === 'ok');
   clearTimeout(warn._t);
-  warn._t = setTimeout(() => { w.hidden = true; }, 6000);
+  warn._t = setTimeout(() => { w.hidden = true; }, kind === 'ok' ? 3200 : 6000);
+}
+
+/* Русские формы: 1 запрос / 2 запроса / 5 запросов */
+function plural(n, one, few, many) {
+  const a = Math.abs(n) % 100, b = a % 10;
+  if (a > 10 && a < 20) return many;
+  if (b === 1) return one;
+  if (b >= 2 && b <= 4) return few;
+  return many;
 }
 
 /* Экран-заглушка вместо чата: ошибка, подписка или техработы.
@@ -115,11 +133,20 @@ function updateHead() {
     : 'Сперанский AI';
   const inp = $('#input');
   if (inp) inp.placeholder = 'Спроси Сперанского…';
-  const chip = $('#btn-model');
-  if (state.current && state.current.provider) {
-    chip.innerHTML = IC.sparkFill + esc(shortModel(state.current.model));
-  } else {
-    chip.innerHTML = IC.sparkFill + 'модель';
+  /* название текущего чата — слева в шапке (тап открывает меню чата) */
+  const tt = $('#head-title');
+  if (tt) tt.textContent = state.current ? (state.current.title || 'Чат') : 'Сперанский AI';
+  /* пилюля модели: логотип провайдера + короткое имя */
+  const name = $('#hp-name');
+  const lg = $('#hp-logo');
+  if (name && lg) {
+    if (state.current && state.current.provider) {
+      lg.innerHTML = logoHtml(state.current.provider);
+      name.textContent = shortModel(state.current.model);
+    } else {
+      lg.innerHTML = '';
+      name.textContent = 'модель';
+    }
   }
   /* правая кнопка хедера меняет роль: инфо о данных → меню чата */
   const ctx = $('#btn-ctx');
@@ -127,13 +154,63 @@ function updateHead() {
     const has = !!(state.current && state.current.messages.length);
     ctx.title = has ? 'Меню чата' : 'Как хранятся данные';
     ctx.setAttribute('aria-label', ctx.title);
-    ctx.innerHTML = has ? IC.dots : IC.brandMark;
   }
 }
 
-function scrollBottom() {
+/* ================= прокрутка ленты ================= */
+/* force — принудительно вниз (своё сообщение, открытие чата). Иначе лента
+   едет вниз только если пользователь и так держится за низ: если он читает
+   историю, стрим не выдёргивает экран, а на кнопке «вниз» загорается точка. */
+function scrollBottom(force) {
   const m = $('#messages');
-  requestAnimationFrame(() => { m.scrollTop = m.scrollHeight; });
+  if (!m) return;
+  if (!force && state.stickBottom === false) { fabDot(true); return; }
+  requestAnimationFrame(() => {
+    const prev = m.style.scrollBehavior;
+    m.style.scrollBehavior = 'auto';       // мгновенно, без «долгой» анимации
+    m.scrollTop = m.scrollHeight;
+    m.style.scrollBehavior = prev;
+  });
+}
+
+/* точка «пришло новое» на кнопке вниз */
+function fabDot(on) {
+  const d = $('#fab-dot');
+  if (d) d.hidden = !on;
+}
+
+function updateFab() {
+  const m = $('#messages');
+  const f = $('#scroll-fab');
+  if (!m || !f) return;
+  const far = m.scrollHeight - m.scrollTop - m.clientHeight > 180;
+  f.hidden = !far || m.hidden;
+  if (!far) fabDot(false);
+}
+
+function setupScroll() {
+  const m = $('#messages');
+  if (!m) return;
+  m.addEventListener('scroll', () => {
+    if (setupScroll._raf) return;
+    setupScroll._raf = requestAnimationFrame(() => {
+      setupScroll._raf = 0;
+      state.stickBottom = isNearBottom(m, 90);
+      updateFab();
+      if (state.stickBottom) fabDot(false);
+    });
+  }, { passive: true });
+  const f = $('#scroll-fab');
+  if (f) {
+    f.onclick = () => {
+      haptic('light');
+      state.stickBottom = true;
+      fabDot(false);
+      scrollBottom(true);
+      updateFab();
+    };
+  }
+  window.addEventListener('resize', updateFab);
 }
 
 function fallbackLine(fallbacks, finalProvider, finalModel) {
@@ -164,6 +241,8 @@ function fallbackLine(fallbacks, finalProvider, finalModel) {
 function addMessageEl(role, text, opts = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'msg ' + (role === 'user' ? 'user' : 'bot');
+  /* история при открытии чата появляется без «дождя» из анимаций */
+  if (opts.anim === false) wrap.classList.add('no-anim');
   if (opts.mi != null) wrap.dataset.mi = opts.mi;
   if (role !== 'user' && opts.fallbacks && opts.fallbacks.length) {
     wrap.appendChild(fallbackLine(opts.fallbacks, opts.provider, opts.model));
@@ -200,11 +279,12 @@ function addMessageEl(role, text, opts = {}) {
   }
   $('#messages').appendChild(wrap);
   scrollBottom();
+  updateFab();
   return bubble;
 }
 
 /* ---------------- действия под ответом: копировать / заново ---------------- */
-async function copyText(t) {
+async function copyText(t, quiet) {
   try {
     await navigator.clipboard.writeText(t);
   } catch (e) {
@@ -219,30 +299,45 @@ async function copyText(t) {
     ta.remove();
     if (prev && prev.id === 'input') { try { prev.focus({ preventScroll: true }); } catch (e3) {} }
   }
-  warn('Скопировано в буфер обмена.');
+  if (!quiet) warn('Скопировано в буфер обмена.', 'ok');
 }
 
+/* Кнопки под ответом. На телефоне — одни иконки, на десктопе к ним
+   добавляются подписи (.act-tx). Копирование подтверждается галочкой
+   прямо в кнопке — тост поверх шапки больше не нужен. */
 function buildActions(text, canRegen) {
   const acts = document.createElement('div');
   acts.className = 'msg-actions';
-  const mk = (cls, title, icon, fn) => {
+  const mk = (cls, title, label, icon, fn) => {
     const b = document.createElement('button');
     b.className = 'act-btn' + (cls ? ' ' + cls : '');
     b.type = 'button';
     b.title = title;
     b.setAttribute('aria-label', title);
-    b.innerHTML = icon;
+    b.innerHTML = icon + (label ? '<span class="act-tx">' + label + '</span>' : '');
     b.onclick = (e) => { e.stopPropagation(); fn(b); };
     acts.appendChild(b);
     return b;
   };
-  mk('', 'Скопировать ответ', IC.copy, () => { haptic('light'); copyText(text); });
+  mk('', 'Скопировать ответ', 'Копировать', IC.copy, (btn) => {
+    haptic('light');
+    copyText(text, true);
+    btn.classList.add('done');
+    btn.innerHTML = IC.check + '<span class="act-tx">Готово</span>';
+    clearTimeout(btn._t);
+    btn._t = setTimeout(() => {
+      btn.classList.remove('done');
+      btn.innerHTML = IC.copy + '<span class="act-tx">Копировать</span>';
+    }, 1500);
+  });
   if (canRegen) {
-    mk('act-regen', 'Перегенерировать ответ', IC.regen, () => {
+    mk('act-regen', 'Перегенерировать ответ', 'Заново', IC.regen, () => {
       hapticSel(); regenerateLast();
     });
   }
-  mk('', 'Поделиться ответом', IC.shareIc, () => { haptic('light'); shareText(text); });
+  mk('', 'Поделиться ответом', 'Поделиться', IC.shareIc, () => {
+    haptic('light'); shareText(text);
+  });
   return acts;
 }
 
@@ -301,8 +396,12 @@ function paintMessages() {
   msgs.forEach((m, i) => { if (m.role !== 'user') lastBot = i; });
   msgs.forEach((m, i) => addMessageEl(
     m.role, m.content,
-    Object.assign({}, m, { mi: i },
+    Object.assign({ anim: false }, m, { mi: i },
       i === lastBot ? { __canRegen: !state.busy } : {})));
+  /* открыли чат — сразу показываем последние сообщения */
+  state.stickBottom = true;
+  scrollBottom(true);
+  updateFab();
 }
 
 /* ================= чаты и модели ================= */
@@ -386,15 +485,63 @@ async function deleteChat(id) {
   renderChatsList();
 }
 
+/* Строка чата: название, модель, человеческое время, удаление в два тапа */
+function chatRowEl(c) {
+  const row = document.createElement('div');
+  row.className = 'chat-row' + (state.current && state.current.id === c.id ? ' active' : '');
+  const t = document.createElement('div');
+  t.className = 'chat-row-title';
+  t.innerHTML = (state.pins.includes(c.id) ? IC.pin : '') + esc(c.title || 'Чат');
+  const s = document.createElement('div');
+  s.className = 'chat-row-sub';
+  const model = document.createElement('span');
+  model.className = 'sub-model';
+  model.textContent = shortModel(c.model) || 'модель';
+  const when = document.createElement('span');
+  when.className = 'sub-time';
+  when.textContent = fmtWhen(c.updated_at);
+  s.appendChild(model);
+  s.appendChild(when);
+  const del = document.createElement('button');
+  del.className = 'icon-btn chat-del';
+  del.title = 'Удалить чат';
+  del.setAttribute('aria-label', 'Удалить чат');
+  del.innerHTML = IC.x;
+  del.onclick = (e) => {
+    e.stopPropagation();
+    if (del.dataset.arm) {
+      deleteChat(c.id).catch((e) => warn('Не удалось удалить чат: ' + e.message));
+      return;
+    }
+    del.dataset.arm = '1';
+    del.textContent = 'точно?';
+    del.classList.add('armed');
+    clearTimeout(del._t);
+    del._t = setTimeout(() => {
+      delete del.dataset.arm;
+      del.classList.remove('armed');
+      del.innerHTML = IC.x;
+    }, 3000);
+  };
+  row.onclick = () => openChat(c.id)
+    .catch((e) => warn('Не удалось открыть чат: ' + e.message));
+  row.appendChild(t); row.appendChild(s); row.appendChild(del);
+  return row;
+}
+
+/* Список чатов с группами по времени — «сегодня / вчера / на неделе / раньше» */
 function renderChatsList() {
   const box = $('#chats-list');
   box.innerHTML = '';
+  const label = $('#chats-label');
+  if (label) label.textContent = state.chats.length ? 'Чаты · ' + state.chats.length : 'Чаты';
   const q = (state.chatFilter || '').trim().toLowerCase();
   const list = state.chats
-    .filter((c) => !q || String(c.title || '').toLowerCase().includes(q))
+    .filter((c) => !q || String(c.title || '').toLowerCase().includes(q) ||
+                          String(c.model || '').toLowerCase().includes(q))
     .sort((a, b) => (state.pins.includes(b.id) ? 1 : 0) - (state.pins.includes(a.id) ? 1 : 0));
   if (!state.chats.length) {
-    box.innerHTML = '<div class="sheet-empty">Чатов пока нет — нажми «Чат» внизу ' +
+    box.innerHTML = '<div class="sheet-empty">Чатов пока нет — нажми «Новый чат» ' +
       'или просто напиши сообщение.</div>';
     return;
   }
@@ -403,41 +550,19 @@ function renderChatsList() {
       esc(q) + '».</div>';
     return;
   }
+  const groups = [['Закреплённые', []], ['Сегодня', []], ['Вчера', []],
+                  ['На этой неделе', []], ['Раньше', []]];
   for (const c of list) {
-    const row = document.createElement('div');
-    row.className = 'chat-row' + (state.current && state.current.id === c.id ? ' active' : '');
-    const t = document.createElement('div');
-    t.className = 'chat-row-title';
-    t.innerHTML = (state.pins.includes(c.id)
-      ? '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:5px;opacity:.7" aria-hidden="true"><path d="M9 4h6l-1 7 3 3v2H7v-2l3-3z"/><path d="M12 16v5"/></svg>'
-      : '') + esc(c.title || 'Чат');
-    const s = document.createElement('div');
-    s.className = 'chat-row-sub';
-    s.textContent = shortModel(c.model) + ' · ' + String(c.updated_at || '').slice(5, 16);
-    const del = document.createElement('button');
-    del.className = 'icon-btn chat-del';
-    del.title = 'Удалить чат';
-    del.innerHTML = IC.x;
-    del.onclick = (e) => {
-      e.stopPropagation();
-      if (del.dataset.arm) {
-        deleteChat(c.id).catch((e) => warn('Не удалось удалить чат: ' + e.message));
-        return;
-      }
-      del.dataset.arm = '1';
-      del.textContent = 'точно?';
-      del.classList.add('armed');
-      clearTimeout(del._t);
-      del._t = setTimeout(() => {
-        delete del.dataset.arm;
-        del.classList.remove('armed');
-        del.innerHTML = IC.x;
-      }, 3000);
-    };
-    row.onclick = () => openChat(c.id)
-      .catch((e) => warn('Не удалось открыть чат: ' + e.message));
-    row.appendChild(t); row.appendChild(s); row.appendChild(del);
-    box.appendChild(row);
+    if (state.pins.includes(c.id)) groups[0][1].push(c);
+    else groups[dayBucket(c.updated_at) + 1][1].push(c);
+  }
+  for (const [name, items] of groups) {
+    if (!items.length) continue;
+    const head = document.createElement('div');
+    head.className = 'chat-group';
+    head.textContent = name;
+    box.appendChild(head);
+    for (const c of items) box.appendChild(chatRowEl(c));
   }
 }
 
@@ -525,13 +650,21 @@ function openSheet(id) {
   if (id === '#chats-sheet') renderChatsList();
   if (id === '#model-sheet') { renderModelTabs(); renderModelsList(); }
   if (id === '#settings-sheet') renderSettings();
-  $(id).hidden = false;
+  const el = $(id);
+  if (!el) return;
+  if (el.__resetDrag) el.__resetDrag();
+  el.hidden = false;
+  if (!el.__dragReady) {           // свайп за ручку — настраиваем один раз
+    el.__dragReady = true;
+    enableDragClose(el, { close: closeSheets, axis: id === '#chats-sheet' ? 'x' : 'y' });
+  }
 }
 function closeSheets() {
-  for (const id of ['#chats-sheet', '#model-sheet', '#settings-sheet',
-                    '#data-sheet', '#files-sheet', '#find-sheet']) {
+  for (const id of SHEETS) {
     const el = $(id);
-    if (el) el.hidden = true;
+    if (!el) continue;
+    if (el.__resetDrag) el.__resetDrag();
+    el.hidden = true;
   }
   closeChatMenu();
 }
@@ -571,9 +704,13 @@ function stopThinking() {
 function clearAttach() {
   state.pendingImage = null;
   $('#attach-preview').hidden = true;
+  autosize();
 }
 
 function compressImage(file) {
+  if (!file || !/^image\//.test(String(file.type || ''))) {
+    return warn('Принимаю только фото — остальные файлы пока не умею.');
+  }
   const reader = new FileReader();
   reader.onload = () => {
     const img = new Image();
@@ -588,6 +725,8 @@ function compressImage(file) {
       state.pendingImage = cv.toDataURL('image/jpeg', 0.82);
       $('#attach-thumb').src = state.pendingImage;
       $('#attach-preview').hidden = false;
+      autosize();
+      haptic('light');
     };
     img.onerror = () => warn('Не удалось прочитать картинку.');
     img.src = reader.result;
@@ -620,6 +759,14 @@ function applyPrefs() {
   else r.dataset.theme = state.theme;
   if (state.accent === 'blue') delete r.dataset.accent;
   else r.dataset.accent = state.accent;
+}
+
+/* Telegram сообщил тёмную схему, а телефон — в светлом режиме: помечаем
+   это, чтобы системная светлая палитра не перебивала цвета Telegram. */
+function applyTgTheme() {
+  const r = document.documentElement;
+  if (tg && tg.colorScheme === 'dark') r.dataset.tgTheme = 'dark';
+  else delete r.dataset.tgTheme;
 }
 
 /* ================= стриминг ================= */
@@ -785,6 +932,12 @@ async function send(opts = {}) {
     : null;
   const text = regen ? ((lastU && lastU.content) || '')
     : (opts.text != null ? String(opts.text) : input.value.trim());
+  if (!text && state.pendingImage && !regen) {
+    // фото есть, подписи нет: сервер ждёт текст вопроса — подсказываем
+    haptic('light');
+    if (input) { try { input.focus(); } catch (e) { /* необязательно */ } }
+    return warn('Допиши, что сделать с фото — одним предложением.');
+  }
   if (!text && !(regen && lastU && lastU.image)) return;
   if (!INIT_DATA) return showFatal('Нет данных Telegram. Открой приложение из чата с ботом.');
   try {
@@ -800,6 +953,7 @@ async function send(opts = {}) {
   const cur = state.current;
   const img = regen ? ((lastU && lastU.image) || null) : state.pendingImage;
   if (!regen) {
+    state.stickBottom = true;              // своё сообщение всегда тянет вниз
     cur.messages.push({ role: 'user', content: text, image: img || undefined });
     clearAttach();
     if (opts.text == null) { input.value = ''; autosize(); }
@@ -949,15 +1103,25 @@ function setSendUI(busy) {
   b.classList.toggle('stopping', !!busy);
   if (ico) ico.innerHTML = busy ? IC.stop : IC.send;
   b.setAttribute('aria-label', busy ? 'остановить генерацию' : 'отправить');
+  /* «печатает…» в шапке + бегущая полоса под ней */
+  const c = $('#composer');
+  if (c) c.classList.toggle('busy', !!busy);
+  const g = $('#gen-bar');
+  if (g) g.hidden = !busy;
+  const h = $('#head-hint');
+  if (h) {
+    h.hidden = !busy;
+    h.textContent = busy ? 'печатает…' : '';
+  }
 }
 
 function autosize() {
   const i = $('#input');
   i.style.height = 'auto';
   i.style.height = Math.min(i.scrollHeight, 140) + 'px';
-  /* Кнопка отправки появляется, когда в поле есть текст. */
+  /* Кнопка отправки «загорается», когда есть текст или прикреплённое фото. */
   const c = $('#composer');
-  if (c) c.classList.toggle('has-text', !!i.value.trim());
+  if (c) c.classList.toggle('has-text', !!i.value.trim() || !!state.pendingImage);
 }
 
 /* ================= настройки (груп-карточки) ================= */
@@ -966,16 +1130,40 @@ const ACCENTS = [['blue', 'Синий'], ['violet', 'Фиолетовый'],
                  ['green', 'Зелёный'], ['orange', 'Оранжевый']];
 const ONOFF = (v) => (v ? 'Вкл' : 'Выкл');
 
+/* Раскрывающийся блок настроек: открыт всегда только один. */
+function toggleExpand(segSel, rowSel) {
+  const seg = $(segSel);
+  if (!seg) return;
+  const open = seg.hidden;
+  document.querySelectorAll('.set-expand').forEach((s) => { if (s !== seg) s.hidden = true; });
+  document.querySelectorAll('.set-row[aria-expanded]').forEach((r) => {
+    if (r.id !== rowSel.replace('#', '')) r.setAttribute('aria-expanded', 'false');
+  });
+  seg.hidden = !open;
+  const row = $(rowSel);
+  if (row) row.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
 function renderSettings() {
   const th = THEMES.find((t) => t[0] === state.theme) || THEMES[0];
   const ac = ACCENTS.find((a) => a[0] === state.accent) || ACCENTS[0];
   $('#set-theme-val').textContent = th[1];
   $('#set-accent-val').innerHTML = '<i class="acc-dot"></i>' + ac[1];
   $('#set-haptics-val').textContent = ONOFF(state.haptics);
+  const sw = $('#set-haptics');
+  if (sw) sw.setAttribute('aria-checked', state.haptics ? 'true' : 'false');
+  document.querySelectorAll('[data-theme-opt]').forEach((b) => {
+    b.classList.toggle('active', b.dataset.themeOpt === state.theme);
+  });
+  document.querySelectorAll('[data-accent-opt]').forEach((b) => {
+    b.classList.toggle('active', b.dataset.accentOpt === state.accent);
+  });
   $('#set-model-val').textContent = state.current && state.current.provider
     ? shortModel(state.current.model) : 'Авто';
   const v = $('#set-version');
   if (v) v.textContent = __APP_V;
+  const vm = $('#set-version-mini');
+  if (vm) vm.textContent = __APP_V;
   /* секция владельца: статистика проекта */
   const statsCard = $('#set-stats');
   if (statsCard) {
@@ -998,6 +1186,8 @@ function renderSettings() {
 function openChatMenu() {
   const cur = state.current;
   if (!cur) { openSheet('#data-sheet'); return; }
+  const form = $('#cm-rename-form');
+  if (form) form.hidden = true;
   $('#cm-title').textContent = cur.title || 'Чат';
   $('#cm-pin-tx').textContent = state.pins.includes(cur.id)
     ? 'Открепить' : 'Закрепить';
@@ -1009,6 +1199,53 @@ function closeChatMenu() {
   const m = $('#chat-menu');
   if (s) s.hidden = true;
   if (m) m.hidden = true;
+  const form = $('#cm-rename-form');
+  if (form) form.hidden = true;
+}
+
+/* Переименование прямо в меню чата: PUT /api/chats/:id {title} — тот же
+   эндпоинт, что и у выбора модели, поэтому боту ничего нового не нужно. */
+function startRename() {
+  const cur = state.current;
+  if (!cur) return;
+  const form = $('#cm-rename-form');
+  const inp = $('#cm-rename-input');
+  if (!form || !inp) return;
+  form.hidden = false;
+  inp.value = cur.title || '';
+  setTimeout(() => { inp.focus(); try { inp.select(); } catch (e) {} }, 60);
+}
+
+async function applyRename() {
+  const cur = state.current;
+  const inp = $('#cm-rename-input');
+  const form = $('#cm-rename-form');
+  if (!cur || !inp) return;
+  if (form) form.hidden = true;
+  const title = inp.value.trim().slice(0, 60);
+  if (!title || title === cur.title) { closeChatMenu(); return; }
+  const old = cur.title;
+  cur.title = title;
+  const row = state.chats.find((c) => c.id === cur.id);
+  if (row) row.title = title;
+  updateHead();
+  renderChatsList();
+  try {
+    if (String(cur.id).startsWith('local-') && state.chatReady) {
+      try { await state.chatReady; } catch (e) { /* ниже решает PUT */ }
+    }
+    if (!String(cur.id).startsWith('local-')) {
+      await api('PUT', `/api/chats/${cur.id}`, { title });
+    }
+    warn('Название обновлено.', 'ok');
+  } catch (e) {
+    cur.title = old;
+    if (row) row.title = old;
+    updateHead();
+    renderChatsList();
+    warn('Не удалось переименовать: ' + errorText(e, e.message));
+  }
+  closeChatMenu();
 }
 
 function chatDigest() {
@@ -1167,38 +1404,60 @@ async function loadStats() {
 }
 function renderQuota() {
   const pill = $('#quota-pill');
-  if (!pill) return;
   const q = state.quota;
-  if (!q) { pill.hidden = true; return; }
-  pill.hidden = false;
-  if (q.unlimited) {
-    pill.textContent = '∞ без лимитов';
-    pill.className = 'quota-pill inf';
+  if (pill) {
+    if (!q) pill.hidden = true;
+    else {
+      pill.hidden = false;
+      if (q.unlimited) {
+        pill.textContent = '∞ без лимитов';
+        pill.className = 'quota-pill inf';
+      } else {
+        pill.textContent = 'сегодня осталось: ' + q.left_day;
+        pill.className = 'quota-pill' + (q.left_day <= 5 ? ' low' : '');
+      }
+    }
+  }
+  /* предупреждение о лимите показываем там, где оно нужно — над полем ввода */
+  const hint = $('#quota-hint');
+  const hintTx = $('#quota-hint-tx');
+  if (!hint || !hintTx) return;
+  if (q && !q.unlimited && q.left_day <= 5) {
+    hintTx.textContent = q.left_day > 0
+      ? 'Осталось ' + q.left_day + ' ' +
+        plural(q.left_day, 'запрос', 'запроса', 'запросов') + ' на сегодня'
+      : 'Лимит на сегодня исчерпан — обновится завтра';
+    hint.hidden = false;
   } else {
-    pill.textContent = 'сегодня осталось: ' + q.left_day;
-    pill.className = 'quota-pill' + (q.left_day <= 5 ? ' low' : '');
+    hint.hidden = true;
   }
 }
 
 /* ================= быстрые действия на пустом экране ================= */
 const QUICK = [
-  { icon: 'pen', tx: 'Написать или разобрать текст',
+  { icon: 'pen', tx: 'Написать текст',
+    full: 'Помоги написать или разобрать текст',
     put: 'Помоги написать или разобрать текст: ' },
-  { icon: 'check2', tx: 'Проверить текст или решение',
+  { icon: 'check2', tx: 'Проверить',
+    full: 'Проверить текст или решение',
     put: 'Проверь текст или решение: найди ошибки и подскажи, как исправить: ' },
-  { icon: 'bulb', tx: 'Объяснить простыми словами',
+  { icon: 'bulb', tx: 'Объяснить',
+    full: 'Объяснить простыми словами',
     put: 'Объясни простыми словами, с примером: ' },
   { icon: 'plan', tx: 'Составить план',
+    full: 'Составить понятный пошаговый план',
     put: 'Составь понятный пошаговый план: ' },
 ];
 function buildQuickActions() {
   const box = $('#quick-actions');
   if (!box) return;
   box.innerHTML = '';
-  for (const q of QUICK) {
+  QUICK.forEach((q, i) => {
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = 'qa-row';
+    b.className = 'qa-tile';
+    b.title = q.full;
+    b.style.animationDelay = Math.min(i * 60, 240) + 'ms';
     b.innerHTML = (IC[q.icon] || '') + '<span>' + esc(q.tx) + '</span>';
     b.onclick = () => {
       haptic('light');
@@ -1209,7 +1468,7 @@ function buildQuickActions() {
       try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch (e) {}
     };
     box.appendChild(b);
-  }
+  });
 }
 
 /* ================= клавиатура: первый тап по чату её прячет =================
@@ -1279,7 +1538,10 @@ function setupKeyboardShield(input) {
 async function boot() {
   loadPrefs();
   applyPrefs();
+  applyTgTheme();
   tgInit();
+  paintLogos();          // знак-заготовки в шторках и на пустом экране
+  syncThemeColor();
   const retry = $('#fatal-retry');
   if (retry) retry.onclick = () => location.reload();
   if (!INIT_DATA) {
@@ -1308,14 +1570,19 @@ async function boot() {
   $('#composer').hidden = false;
   $('#messages').hidden = false;
   buildQuickActions();
+  setupScroll();
   $('#btn-chats').onclick = () => { haptic('light'); openSheet('#chats-sheet'); };
   $('#btn-model').onclick = () => { haptic('light'); openSheet('#model-sheet'); };
-  /* правая кнопка хедера: инфо о данных → меню чата */
-  $('#btn-ctx').onclick = () => {
+  /* название чата и правый верхний угол ведут в одно меню: есть чат —
+     меню чата, нет — экран «как хранятся данные» */
+  const ctxOpen = () => {
     haptic('light');
     if (state.current && state.current.messages.length) openChatMenu();
     else openSheet('#data-sheet');
   };
+  $('#btn-ctx').onclick = ctxOpen;
+  const ttBtn = $('#btn-title');
+  if (ttBtn) ttBtn.onclick = ctxOpen;
   $('#btn-new').onclick = () => {
     haptic('light');
     closeSheets();
@@ -1352,34 +1619,78 @@ async function boot() {
 
   /* ---- drawer ---- */
   $('#btn-settings').onclick = () => { haptic('light'); openSheet('#settings-sheet'); };
-  $('#btn-find-global').onclick = () => {
-    const f = $('#drawer-filter');
-    f.hidden = !f.hidden;
-    if (!f.hidden) f.focus();
-    else { state.chatFilter = ''; f.value = ''; renderChatsList(); }
+  const dSearch = $('#drawer-search');
+  const dFilter = $('#drawer-filter');
+  const dClear = $('#drawer-filter-clear');
+  const closeDrawerSearch = () => {
+    dSearch.hidden = true;
+    dFilter.value = '';
+    state.chatFilter = '';
+    if (dClear) dClear.hidden = true;
+    renderChatsList();
   };
-  $('#drawer-filter').addEventListener('input', (e) => {
+  $('#btn-find-global').onclick = () => {
+    haptic('light');
+    dSearch.hidden = !dSearch.hidden;
+    if (!dSearch.hidden) setTimeout(() => dFilter.focus(), 60);
+    else closeDrawerSearch();
+  };
+  dFilter.addEventListener('input', (e) => {
     state.chatFilter = e.target.value;
+    if (dClear) dClear.hidden = !e.target.value;
     renderChatsList();
   });
-  document.querySelectorAll('.soon-nav').forEach((el) => {
+  if (dClear) {
+    dClear.onclick = () => {
+      dFilter.value = '';
+      state.chatFilter = '';
+      dClear.hidden = true;
+      renderChatsList();
+      dFilter.focus();
+    };
+  }
+  document.querySelectorAll('.soon-nav, .soon-chip').forEach((el) => {
     el.onclick = () => {
       haptic('light');
-      warn((el.dataset.soon || 'Раздел') + ' — появится в следующем обновлении.');
+      warn((el.dataset.soon || 'Раздел') + ' — в разработке, появится в обновлениях.');
     };
   });
 
+  /* ---- поиск по моделям ---- */
+  const mSearch = $('#model-search');
+  const mClear = $('#model-search-clear');
+  if (mSearch) {
+    mSearch.addEventListener('input', (e) => {
+      state.modelQuery = e.target.value;
+      if (mClear) mClear.hidden = !e.target.value;
+      renderModelsList();
+    });
+  }
+  if (mClear) {
+    mClear.onclick = () => {
+      mSearch.value = '';
+      state.modelQuery = '';
+      mClear.hidden = true;
+      renderModelsList();
+      mSearch.focus();
+    };
+  }
+
   /* ---- настройки ---- */
-  $('#set-theme').onclick = () => {
-    const i = THEMES.findIndex((t) => t[0] === state.theme);
-    state.theme = THEMES[(i + 1) % THEMES.length][0];
-    applyPrefs(); savePrefs(); renderSettings(); hapticSel();
-  };
-  $('#set-accent').onclick = () => {
-    const i = ACCENTS.findIndex((a) => a[0] === state.accent);
-    state.accent = ACCENTS[(i + 1) % ACCENTS.length][0];
-    applyPrefs(); savePrefs(); renderSettings(); hapticSel();
-  };
+  $('#set-theme').onclick = () => { haptic('light'); toggleExpand('#set-theme-seg', '#set-theme'); };
+  $('#set-accent').onclick = () => { haptic('light'); toggleExpand('#set-accent-seg', '#set-accent'); };
+  document.querySelectorAll('[data-theme-opt]').forEach((b) => {
+    b.onclick = () => {
+      state.theme = b.dataset.themeOpt;
+      applyPrefs(); savePrefs(); renderSettings(); syncThemeColor(); hapticSel();
+    };
+  });
+  document.querySelectorAll('[data-accent-opt]').forEach((b) => {
+    b.onclick = () => {
+      state.accent = b.dataset.accentOpt;
+      applyPrefs(); savePrefs(); renderSettings(); syncThemeColor(); hapticSel();
+    };
+  });
   $('#set-model').onclick = () => { closeSheets(); openSheet('#model-sheet'); };
   $('#set-haptics').onclick = () => {
     state.haptics = !state.haptics;
@@ -1427,16 +1738,20 @@ async function boot() {
     if (i >= 0) state.pins.splice(i, 1); else state.pins.push(id);
     savePrefs(); renderChatsList(); closeChatMenu(); hapticSel();
   };
-  $('#cm-project').onclick = () => {
-    closeChatMenu();
-    warn('Проекты — скоро. Допилим в следующем обновлении.');
-  };
   $('#cm-files').onclick = () => { closeChatMenu(); openFilesSheet(); };
   $('#cm-find').onclick = () => { closeChatMenu(); openFindSheet(); };
-  $('#cm-archive').onclick = () => {
-    closeChatMenu();
-    warn('Архив — скоро. Допилим в следующем обновлении.');
-  };
+  const rnBtn = $('#cm-rename');
+  if (rnBtn) rnBtn.onclick = () => { haptic('light'); startRename(); };
+  const rnForm = $('#cm-rename-form');
+  if (rnForm) {
+    rnForm.onsubmit = (e) => { e.preventDefault(); hapticSel(); applyRename(); };
+  }
+  const rnInput = $('#cm-rename-input');
+  if (rnInput) {
+    rnInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); closeChatMenu(); }
+    });
+  }
   $('#cm-delete').onclick = () => {
     closeChatMenu();
     const id = state.current && state.current.id;
@@ -1452,6 +1767,53 @@ async function boot() {
 
   /* ---- поиск в чате ---- */
   $('#find-input').addEventListener('input', (e) => renderFind(e.target.value));
+
+  /* ---- фото: вставка из буфера и перетаскивание (десктоп) ---- */
+  document.addEventListener('paste', (e) => {
+    const dt = e.clipboardData;
+    if (!dt || !dt.files || !dt.files.length) return;
+    const f = Array.prototype.find.call(dt.files, (x) => /^image\//.test(x.type));
+    if (!f) return;
+    e.preventDefault();
+    compressImage(f);
+  });
+  const dropHint = $('#drop-hint');
+  const hasFiles = (e) => !!(e.dataTransfer && e.dataTransfer.types &&
+    Array.prototype.indexOf.call(e.dataTransfer.types, 'Files') >= 0);
+  let dragDepth = 0;
+  window.addEventListener('dragenter', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth += 1;
+    if (dropHint) dropHint.hidden = false;
+  });
+  window.addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
+  window.addEventListener('dragleave', () => {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth && dropHint) dropHint.hidden = true;
+  });
+  window.addEventListener('drop', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth = 0;
+    if (dropHint) dropHint.hidden = true;
+    const f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) compressImage(f);
+  });
+
+  /* ---- клавиатура и тема ---- */
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || e.isComposing) return;
+    if (!$('#chat-menu').hidden) { closeChatMenu(); return; }
+    for (const id of SHEETS) {
+      if (!$(id).hidden) { closeSheets(); return; }
+    }
+  });
+  if (tg && typeof tg.onEvent === 'function') {
+    try {
+      tg.onEvent('themeChanged', () => { applyTgTheme(); syncThemeColor(); });
+    } catch (e) { /* старый клиент Telegram */ }
+  }
 
   if (state.chats.length) {
     try { await openChat(state.chats[0].id); } catch (e) {

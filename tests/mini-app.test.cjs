@@ -6,8 +6,8 @@ const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
 const JS_FILES = [
-  'js/config.js', 'js/api.js', 'js/logos.js', 'js/render.js',
-  'js/icons.js', 'js/models.js', 'js/models-list.js', 'app.js',
+  'js/config.js', 'js/api.js', 'js/logos.js', 'js/brand.js', 'js/render.js',
+  'js/ui.js', 'js/icons.js', 'js/models.js', 'js/models-list.js', 'app.js',
 ];
 // Все скрипты читаются в порядке загрузки из index.html (обычные скрипты
 // делят глобальную область), поэтому проверки видят весь клиент целиком.
@@ -156,12 +156,109 @@ test('filtered replies do not decrement the quota pill', () => {
   assert.doesNotMatch(app + html, /снимает лимит|без лимита за донат/i);
 });
 
-test('brand star is gone: text wordmark on boot, no giant star on empty screen, «С» in header', () => {
+test('brand star is gone: text wordmark stays, «С» с искрой — единый знак', () => {
   assert.doesNotMatch(html, /M12 1l2\.6 8\.4L23 12/);
   assert.doesNotMatch(html, /boot-spark|empty-spark/);
   assert.match(html, /class="brand-word boot-word"[^>]*><span class="brand-name">Сперанский<\/span><span class="brand-ai">AI<\/span>/);
-  assert.match(html, /<button id="btn-ctx"[\s\S]*?<span class="brand-mark" aria-hidden="true">С<\/span>/);
-  assert.match(css, /\.brand-mark\s*\{/);
+  /* знак: дуга-«С» и искра ИИ, в шапке — название чата вместо буквы-заглушки */
+  assert.match(html, /class="lg-c" d="M14\.2 7\.5A5\.3 5\.3 0 1 0 14\.2 16\.5"/);
+  assert.match(html, /class="lg-spark"/);
+  assert.match(css, /\.logo\s*\{[^}]*background:\s*linear-gradient/);
+  assert.doesNotMatch(css + app + html, /brandMark|\.brand-mark\s*\{/);
+  assert.match(html, /<span class="head-title" id="head-title"/);
+});
+
+test('brand glyph in index.html and js/brand.js cannot drift apart', () => {
+  const start = html.indexOf('<span class="logo logo-boot"');
+  assert.ok(start > 0, 'boot mark is inline in index.html');
+  const inlineLogo = html.slice(start, html.indexOf('</span>', html.indexOf('</svg>', start)));
+  const brandJs = fs.readFileSync(path.join(root, 'js/brand.js'), 'utf8')
+    .replace(/'\s*\+\s*'/g, '');            // склейка строковых литералов
+  const paths = (s) => [...s.matchAll(/d="([^"]+)"/g)]
+    .map((m) => m[1].replace(/\s+/g, ' ').trim()).sort();
+  assert.deepEqual(paths(brandJs), paths(inlineLogo),
+    'paths in js/brand.js must match the inline boot logo');
+  assert.match(brandJs, /function paintLogos\(/);
+  assert.match(brandJs, /class="logo-glyph"/);
+});
+
+test('no CSS animation can hide the mark when motion is reduced', () => {
+  assert.match(css, /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.logo \.lg-c\s*\{\s*stroke-dashoffset:\s*0\s*!important/);
+  assert.match(css, /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.logo \.lg-spark\s*\{\s*opacity:\s*1\s*!important/);
+});
+
+test('header keeps the chat context: title, model pill, generation bar', () => {
+  assert.match(html, /<button id="btn-model"[\s\S]*?id="hp-logo"[\s\S]*?id="hp-name"/);
+  assert.match(html, /id="gen-bar"/);
+  assert.match(app, /const tt = \$\('#head-title'\)/);
+  assert.match(app, /name\.textContent = shortModel\(state\.current\.model\)/);
+  assert.match(app, /lg\.innerHTML = logoHtml\(state\.current\.provider\)/);
+  assert.match(app, /g\.hidden = !busy/);
+});
+
+test('list of chats is grouped by time and shows human dates', () => {
+  assert.match(app, /fmtWhen\(c\.updated_at\)/);
+  assert.match(app, /dayBucket\(c\.updated_at\)/);
+  assert.match(app, /'Закреплённые', \[\]/);
+  assert.doesNotMatch(app, /slice\(5, 16\)/);
+});
+
+test('reading history is not interrupted: follow-bottom only near the bottom', () => {
+  assert.match(app, /function scrollBottom\(force\)/);
+  assert.match(app, /state\.stickBottom === false/);
+  assert.match(app, /if \(!force && state\.stickBottom === false\)/);
+  assert.match(html, /id="scroll-fab"/);
+  assert.match(html, /id="fab-dot"/);
+  assert.match(app, /document\.addEventListener\('keydown'/);
+});
+
+test('no dead “скоро” menu rows: only real actions in the chat menu', () => {
+  assert.doesNotMatch(html, /id="cm-project"|id="cm-archive"/);
+  assert.doesNotMatch(app, /cm-project|cm-archive/);
+  assert.match(html, /id="cm-rename"/);
+  assert.match(html, /id="cm-rename-form"/);
+  assert.match(app, /api\('PUT', `\/api\/chats\/\$\{cur\.id\}`, \{ title \}\)/);
+});
+
+test('the bot API contract is untouched', () => {
+  for (const ep of ['/api/boot', '/api/models', '/api/chats', '/api/chat',
+                    '/api/quota', '/api/stats', '/api/debug']) {
+    assert.ok(app.includes(ep), ep + ' still requested');
+  }
+  assert.match(app, /initData: INIT_DATA, provider: cur\.provider, model: cur\.model/);
+  assert.match(app, /messages: cur\.messages, stream: !NO_STREAM/);
+  assert.match(app, /applyImageWindow\(clean\)/);
+});
+
+test('models sheet has search, skeleton and a check on the current model', () => {
+  assert.match(html, /id="model-search"/);
+  assert.match(app, /state\.modelQuery/);
+  assert.match(app, /sk-row/);
+  assert.match(app, /renderModelsList/);
+});
+
+test('sheets can be swiped away by the handle only', () => {
+  assert.match(html, /class="sheet-grab"/);
+  assert.match(app, /enableDragClose\(/);
+  assert.match(app, /el\.__dragReady = true/);
+  const ui = fs.readFileSync(path.join(root, 'js/ui.js'), 'utf8');
+  assert.match(ui, /function enableDragClose\(/);
+  assert.match(ui, /closest\('button, a, input, textarea, select, label'\)/);
+  assert.match(css, /\.sheet-grab\s*\{[^}]*touch-action:\s*none/);
+});
+
+test('low quota is warned right above the composer', () => {
+  assert.match(html, /id="quota-hint"/);
+  assert.match(html, /id="quota-hint-tx"/);
+  assert.match(app, /q\.left_day <= 5/);
+  assert.match(app, /plural\(q\.left_day, 'запрос', 'запроса', 'запросов'\)/);
+});
+
+test('code blocks can be copied without leaking the button label', () => {
+  assert.match(html + app, /copyText\(txt, true\)/);
+  assert.match(app, /function addCodeCopy\(/);
+  assert.match(app, /pre\.querySelector\('code'\)/);
+  assert.match(css, /\.code-copy\s*\{/);
 });
 
 test('empty screen positions a universal assistant, not "school and uni"', () => {
