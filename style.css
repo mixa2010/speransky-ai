@@ -82,16 +82,30 @@ body { display: flex; flex-direction: column; }
 /* ---------------- загрузка ---------------- */
 .boot { min-height: 80vh; display: flex; flex-direction: column;
         align-items: center; justify-content: center; gap: 14px; }
-.boot-spark { width: 44px; height: 44px; fill: var(--accent);
-  filter: drop-shadow(0 0 14px color-mix(in srgb, var(--accent) 55%, transparent));
+/* текстовый знак «Сперанский AI» — без картинок, читается в обеих темах:
+   имя цветом текста, «AI» — плашкой цвета кнопки Telegram с её же текстом */
+.brand-word { display: inline-flex; align-items: center; gap: .32em;
+  color: var(--text); font-weight: 800; letter-spacing: -.03em; line-height: 1;
+  white-space: nowrap; }
+.brand-ai { display: inline-block; padding: .14em .34em .16em; border-radius: .32em;
+  background: var(--accent); color: var(--accent-tx);
+  font-size: .78em; font-weight: 800; letter-spacing: .01em; }
+.boot-word { font-size: 30px;
   transform-origin: center;
   animation: boot-mark-in 600ms var(--ease) both; }
 @keyframes boot-mark-in {
-  0% { opacity: .72; transform: scale(.88) rotate(-8deg); }
-  70% { opacity: 1; transform: scale(1.06) rotate(2deg); }
-  100% { opacity: 1; transform: scale(1) rotate(0); }
+  0% { opacity: .6; transform: translateY(6px) scale(.96); }
+  70% { opacity: 1; transform: translateY(-1px) scale(1.01); }
+  100% { opacity: 1; transform: none; }
 }
-.boot-text { color: var(--hint); font-size: 14px; letter-spacing: .02em; }
+.boot-text { color: var(--hint); font-size: 12.5px; letter-spacing: .02em; }
+
+/* короткий знак «С» в круглой кнопке шапки */
+.brand-mark { display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 999px;
+  background: var(--accent); color: var(--accent-tx);
+  font-size: 15px; font-weight: 800; line-height: 1; letter-spacing: 0;
+  font-family: inherit; }
 
 /* ---------------- ошибка ---------------- */
 .fatal { max-width: 560px; margin: 12vh auto 0; padding: 0 22px; text-align: center; }
@@ -99,6 +113,12 @@ body { display: flex; flex-direction: column; }
 .fatal h1 { font-size: 20px; margin: 10px 0 6px; letter-spacing: -.01em; }
 .fatal p { color: var(--hint); font-size: 14.5px; margin: 6px 0; }
 .fatal-retry { margin-top: 14px; padding: 10px 26px; font-size: 15px; }
+.fatal-subscribe { display: block; margin: 18px auto 0; min-width: 220px; padding: 13px 26px;
+  border: 0; border-radius: 999px; background: var(--accent); color: var(--accent-tx);
+  font-family: inherit; font-size: 16px; font-weight: 700; cursor: pointer;
+  transition: transform .18s var(--ease); }
+.fatal-subscribe:active { transform: scale(.97); }
+.fatal-subscribe + .fatal-retry { display: inline-flex; gap: 6px; align-items: center; }
 
 /* ---------------- шапка (стекло) ---------------- */
 #head {
@@ -291,9 +311,6 @@ body { display: flex; flex-direction: column; }
 .empty { flex: 1; display: flex; flex-direction: column; align-items: center;
          justify-content: center; gap: 6px; color: var(--hint);
          text-align: center; padding: 24px; }
-.empty-spark { width: 52px; height: 52px; fill: var(--accent); opacity: .9;
-  filter: drop-shadow(0 0 18px color-mix(in srgb, var(--accent) 45%, transparent));
-  margin-bottom: 6px; }
 .empty h2 { color: var(--text); font-size: 24px; margin: 10px 0 2px;
             letter-spacing: -.02em; font-weight: 750; }
 .empty p { font-size: 14.5px; margin: 0; line-height: 1.45; }
@@ -310,6 +327,13 @@ body { display: flex; flex-direction: column; }
 .cta-link { border: 0; background: transparent; color: var(--hint);
   font-family: inherit; font-size: 13px; margin-top: 14px; cursor: pointer;
   text-decoration: underline; text-underline-offset: 3px; }
+
+/* ---------------- слой «спрятать клавиатуру» ----------------
+   Виден, пока #input в фокусе. Лежит над лентой и пустым экраном (z 20),
+   но под шапкой и композером (z 30), превью фото (z 25) и шторками (z 50+),
+   поэтому кнопки и пилюля ввода остаются доступны. */
+.kb-shield { position: fixed; inset: 0; z-index: 20; background: transparent;
+  -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; }
 
 /* ---------------- превью фото ---------------- */
 .attach-preview {
@@ -660,6 +684,14 @@ body { display: flex; flex-direction: column; }
   margin-bottom: 8px;
 }
 .quota-pill.low { color: var(--warn-c); border-color: color-mix(in srgb, var(--warn-c) 45%, transparent); }
+.support-row { display: flex; align-items: baseline; gap: 8px; width: 100%;
+  white-space: nowrap;
+  border: 0; background: transparent; color: var(--text); text-align: left;
+  font-family: inherit; font-size: 13.5px; font-weight: 600; padding: 2px 2px 8px;
+  cursor: default; }
+.support-row.link { color: var(--accent); cursor: pointer; }
+.support-row small { color: var(--hint); font-size: 12px; font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
 .quota-pill.inf { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 
 /* ---------------- настройки (груп-карточки) ---------------- */
