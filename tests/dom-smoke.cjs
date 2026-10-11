@@ -227,6 +227,44 @@ async function happyPath() {
     $('#find-list').textContent.slice(0, 50));
 }
 
+/* ================= 1.5 пустая лента не крадёт пол-экрана ================= */
+async function emptyState() {
+  const w = makeWindow((u) => {
+    if (u.includes('/api/boot')) {
+      return Promise.resolve(json({ models: MODELS, chats: [], policy: { free: true } }));
+    }
+    if (u.includes('/api/quota')) return Promise.resolve(json({ left_day: 9, unlimited: false }));
+    if (u.includes('/api/chats')) {
+      return Promise.resolve(json({ id: 'n1', title: 'Новый чат',
+        model: 'gemini/gemini-2.5-flash', updated_at: new Date().toISOString() }));
+    }
+    if (u.includes('/api/chat')) {
+      return Promise.resolve(json({ reply: 'Привет!', provider: 'gemini',
+        model: 'gemini-2.5-flash', filtered: false, fallbacks: [] }));
+    }
+    return Promise.resolve(json({}));
+  });
+  await sleep(80);
+  const d = w.document;
+  check('пустая лента скрыта — приветствие на весь экран',
+    d.querySelector('#messages').hidden === true && d.querySelector('#empty').hidden === false,
+    'messages.hidden=' + d.querySelector('#messages').hidden +
+    ', empty.hidden=' + d.querySelector('#empty').hidden);
+  d.querySelector('#btn-new').click();
+  await sleep(40);
+  check('новый чат: лента уступает место экрану «Чат готов», без чёрной пустоты',
+    d.querySelector('#empty').hidden === false && d.querySelector('#messages').hidden === true &&
+    /Чат готов/.test(d.querySelector('#empty-title').textContent),
+    d.querySelector('#empty-title').textContent);
+  d.querySelector('#input').value = 'привет';
+  d.querySelector('#input').dispatchEvent(new w.Event('input'));
+  d.querySelector('#btn-send').click();
+  await sleep(120);
+  check('после отправки лента видна, приветствие скрыто',
+    d.querySelector('#messages').hidden === false && d.querySelector('#empty').hidden === true,
+    'messages.hidden=' + d.querySelector('#messages').hidden);
+}
+
 /* ================= 2. отказы сервера ================= */
 async function gates() {
   {
@@ -299,6 +337,7 @@ async function gates() {
 
 (async () => {
   await happyPath();
+  await emptyState();
   await gates();
   console.log(problems.length ? '\nПРОБЛЕМЫ:\n' + problems.join('\n') : '\nВсё чисто.');
   process.exit(problems.length ? 1 : 0);

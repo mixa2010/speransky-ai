@@ -7,7 +7,7 @@
    Render несёт Telegram initData, подпись проверяется сервером.
    ============================================================ */
 'use strict';
-window.__APP_V = '20261011d';
+window.__APP_V = '20261011e';
 const FALL_REASON = {
   rate: 'кончился лимит',
   cooldown: 'на кулдауне',
@@ -380,6 +380,10 @@ function paintMessages() {
   box.innerHTML = '';
   const msgs = state.current ? state.current.messages : [];
   $('#empty').hidden = msgs.length > 0;
+  /* пустая лента не должна занимать место: раньше скрытых сообщений не
+     было, и flex:1 растягивал пустой #messages на пол-экрана — над
+     приветствием висел большой чёрный прямоугольник */
+  box.hidden = msgs.length === 0;
   const cta = $('#btn-start-cta');
   const et = $('#empty-title');
   const ex = $('#empty-text');
@@ -392,7 +396,6 @@ function paintMessages() {
     et.textContent = EMPTY_TITLE;
     ex.innerHTML = EMPTY_TEXT;
   }
-  box.hidden = false;
   let lastBot = -1;
   msgs.forEach((m, i) => { if (m.role !== 'user') lastBot = i; });
   msgs.forEach((m, i) => addMessageEl(
@@ -1549,6 +1552,15 @@ async function boot() {
     return showFatal('Открой меня из Telegram: в чате с ботом нажми кнопку ' +
       'меню (квадратик слева от поля ввода) или кнопку «📱 Открыть приложение».');
   }
+  /* бесплатный сервер просыпается долго: чтобы стартовый экран не выглядел
+     зависшим чёрным квадратом, через пару секунд подсказываем, что это норма */
+  const bootHintT = setTimeout(() => {
+    const bt = document.querySelector('.boot-text');
+    const boot = $('#boot');
+    if (bt && boot && !boot.hidden) {
+      bt.textContent = 'Сервер просыпается после спячки — ещё несколько секунд…';
+    }
+  }, 6000);
   try {
     try {
       const b = await api('GET', '/api/boot');
@@ -1562,10 +1574,12 @@ async function boot() {
       await Promise.all([loadModels(), loadChats()]);
     }
   } catch (e) {
+    clearTimeout(bootHintT);
     if (gateForError(e)) return;
     return showFatal('Не удалось связаться с ботом: ' + e.message +
       '. Проверь интернет и попробуй ещё раз.');
   }
+  clearTimeout(bootHintT);
   state.booted = true;
   $('#boot').hidden = true;
   $('#head').hidden = false;
@@ -1579,6 +1593,7 @@ async function boot() {
      меню чата, нет — экран «как хранятся данные» */
   const ctxOpen = () => {
     haptic('light');
+    if (!$('#chat-menu').hidden) { closeChatMenu(); return; }  // повторный тап закрывает
     if (state.current && state.current.messages.length) openChatMenu();
     else openSheet('#data-sheet');
   };
@@ -1801,6 +1816,12 @@ async function boot() {
     if (dropHint) dropHint.hidden = true;
     const f = e.dataTransfer.files && e.dataTransfer.files[0];
     if (f) compressImage(f);
+  });
+  /* перетаскивание могли отменить (Esc) или бросить за окном — без dragend
+     тёмная подсказка с рамкой оставалась висеть поверх всего интерфейса */
+  window.addEventListener('dragend', () => {
+    dragDepth = 0;
+    if (dropHint) dropHint.hidden = true;
   });
 
   /* ---- клавиатура и тема ---- */
