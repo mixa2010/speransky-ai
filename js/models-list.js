@@ -11,14 +11,15 @@ const CATS = [
 ];
 
 function modelRow(m) {
+  const mine = !!(state.current && state.current.provider === m.provider &&
+    state.current.model === m.model);
   const row = document.createElement('div');
-  row.className = 'model-row ' + (m.state || 'ok') +
-    (state.current && state.current.provider === m.provider &&
-     state.current.model === m.model ? ' active' : '');
+  row.className = 'model-row ' + (m.state || 'ok') + (mine ? ' active' : '');
   const t = document.createElement('div');
   t.className = 'model-row-title';
   t.innerHTML = logoHtml(m.provider) + ' ' + esc(m.model) +
-    (m.vision ? ' <span class="vis-dot" title="видит фото"></span>' : '');
+    (mine ? '<span class="mr-check" aria-label="выбрана">' + IC.check + '</span>' : '') +
+    (m.vision ? ' <span class="vis-dot" title="понимает фото"></span>' : '');
   const s2 = document.createElement('div');
   s2.className = 'model-row-sub';
   s2.textContent = m.provider + ' · ' + (STATE_RU[m.state] || m.state);
@@ -59,6 +60,12 @@ function renderModelTabs() {
     b.onclick = () => {
       if (state.modelTab === cat.id) return;
       state.modelTab = cat.id;
+      /* переход по вкладкам сбрасывает поиск — иначе список «залипает» */
+      state.modelQuery = '';
+      const ms = $('#model-search');
+      const mc = $('#model-search-clear');
+      if (ms) ms.value = '';
+      if (mc) mc.hidden = true;
       haptic('light');
       renderModelTabs();
       renderModelsList();
@@ -71,6 +78,42 @@ function renderModelsList() {
   const box = $('#models-list');
   box.innerHTML = '';
   const cat = CATS.find((c) => c.id === state.modelTab) || CATS[0];
+  const q = (state.modelQuery || '').trim().toLowerCase();
+  /* пока сервер не отдал список — показываем скелетон, а не пустоту */
+  if (!state.models.length && !cat.soon) {
+    if (!state.booted) {
+      for (let i = 0; i < 4; i++) {
+        const sk = document.createElement('div');
+        sk.className = 'sk-row';
+        box.appendChild(sk);
+      }
+    } else {
+      const none = document.createElement('div');
+      none.className = 'sheet-empty';
+      none.textContent = 'Сервер не вернул список моделей. Закрой шторку и попробуй ещё раз.';
+      box.appendChild(none);
+    }
+    return;
+  }
+  /* поиск ищет по всем категориям — так быстрее найти нужную модель */
+  if (q) {
+    const found = state.models.filter((m) =>
+      String(m.model || '').toLowerCase().includes(q) ||
+      String(m.provider || '').toLowerCase().includes(q));
+    const note = document.createElement('div');
+    note.className = 'soon-row';
+    note.textContent = found.length
+      ? 'Поиск по всем категориям' : 'Ничего не нашлось — попробуй другое название.';
+    box.appendChild(note);
+    const sorted = found.slice().sort((a, b) =>
+      (STATE_RANK[a.state] ?? 3) - (STATE_RANK[b.state] ?? 3));
+    for (const m of sorted) box.appendChild(modelRow(m));
+    box.querySelectorAll('.model-row').forEach((el, i) => {
+      el.classList.add('tab-in');
+      el.style.animationDelay = Math.min(i * 22, 220) + 'ms';
+    });
+    return;
+  }
   if (cat.soon) {
     const soon = document.createElement('div');
     soon.className = 'soon-tile soon-tile-big tab-in';

@@ -230,6 +230,33 @@ function scrubLatexLeftovers(root) {
   }
 }
 
+/* Кнопка «Копировать» у блоков кода — как в больших чат-клиентах.
+   Текст берём из <code>, а не из всего <pre>, чтобы служебная подпись
+   кнопки не попадала в буфер. */
+function addCodeCopy(root) {
+  root.querySelectorAll('pre').forEach((pre) => {
+    if (pre.querySelector('.code-copy')) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'code-copy';
+    btn.textContent = 'Копировать';
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const src = pre.querySelector('code');
+      const txt = (src || pre).textContent || '';
+      if (typeof copyText === 'function') copyText(txt, true);
+      btn.textContent = 'Скопировано';
+      btn.classList.add('done');
+      clearTimeout(btn._t);
+      btn._t = setTimeout(() => {
+        btn.textContent = 'Копировать';
+        btn.classList.remove('done');
+      }, 1600);
+    };
+    pre.appendChild(btn);
+  });
+}
+
 function renderRich(container, text) {
   const math = extractMath(text);
   let html;
@@ -246,6 +273,7 @@ function renderRich(container, text) {
   renderMathInto(container, math.store);
   healKatexErrors(container);
   scrubLatexLeftovers(container);
+  addCodeCopy(container);
   if (!hasMarked || !katexReady()) container.classList.add('plain');
 }
 
