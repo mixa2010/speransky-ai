@@ -735,7 +735,7 @@ body::before {
   overflow-y: auto; overscroll-behavior: contain;
   padding: 10px 14px calc(20px + var(--safe-b));
 }
-.chats-list { flex: 1; }
+.chats-list, .models-list { flex: 1 1 auto; min-height: 0; }
 .sheet-empty { color: var(--hint); padding: 24px 22px; text-align: center; font-size: 14px; line-height: 1.45; }
 
 .chat-row, .model-row {

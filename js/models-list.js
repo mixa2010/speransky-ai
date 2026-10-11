@@ -81,10 +81,17 @@ function renderModelsList() {
   const q = (state.modelQuery || '').trim().toLowerCase();
   /* пока сервер не отдал список — показываем скелетон, а не пустоту */
   if (!state.models.length && !cat.soon) {
-    for (let i = 0; i < 4; i++) {
-      const sk = document.createElement('div');
-      sk.className = 'sk-row';
-      box.appendChild(sk);
+    if (!state.booted) {
+      for (let i = 0; i < 4; i++) {
+        const sk = document.createElement('div');
+        sk.className = 'sk-row';
+        box.appendChild(sk);
+      }
+    } else {
+      const none = document.createElement('div');
+      none.className = 'sheet-empty';
+      none.textContent = 'Сервер не вернул список моделей. Закрой шторку и попробуй ещё раз.';
+      box.appendChild(none);
     }
     return;
   }

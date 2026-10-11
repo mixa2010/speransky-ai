@@ -37,6 +37,7 @@ const state = {
   chatFilter: '',         // фильтр списка чатов в drawer
   modelQuery: '',         // поиск по списку моделей
   stickBottom: true,      // лента приклеена к низу (пользователь не читает историю)
+  booted: false,          // данные первого экрана уже получены
 };
 
 /* Шторки, которые закрываются одинаково (клик по фону, Esc, свайп). */
@@ -1565,6 +1566,7 @@ async function boot() {
     return showFatal('Не удалось связаться с ботом: ' + e.message +
       '. Проверь интернет и попробуй ещё раз.');
   }
+  state.booted = true;
   $('#boot').hidden = true;
   $('#head').hidden = false;
   $('#composer').hidden = false;

@@ -281,3 +281,13 @@ test('keyboard shield sits over the chat only and blurs on first touch', () => {
 test('no Cloudflare challenge script in index.html', () => {
   assert.doesNotMatch(html, /cdn-cgi|__CF\$cv\$params/);
 });
+
+test('sheets announce themselves as dialogs and close on Escape', () => {
+  for (const id of ['chats-sheet', 'model-sheet', 'settings-sheet',
+                    'data-sheet', 'files-sheet', 'find-sheet']) {
+    assert.match(html, new RegExp(`id="${id}"[^>]*role="dialog" aria-modal="true" aria-label="`),
+      id + ' is a dialog');
+  }
+  assert.match(app, /document\.addEventListener\('keydown',[\s\S]*?e\.key !== 'Escape'/);
+  assert.match(app, /for \(const id of SHEETS\) \{\s*\n\s*if \(!\$\(id\)\.hidden\) \{ closeSheets\(\); return; \}/);
+});
