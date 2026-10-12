@@ -749,33 +749,54 @@ body::before {
   background: color-mix(in srgb, var(--surface-1) 55%, transparent);
   transition: transform .18s var(--ease), border-color .18s var(--ease), background .18s var(--ease);
 }
+.model-row {
+  width: 100%; color: var(--text); font: inherit; text-align: left;
+  appearance: none; -webkit-appearance: none;
+}
 .chat-row:active, .model-row:active { transform: scale(.985); }
 .chat-row.active, .model-row.active {
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
   background: color-mix(in srgb, var(--accent) 10%, var(--surface-1));
 }
+.model-row:focus-visible, .cat-tab:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
 .chat-row-title, .model-row-title {
   font-weight: 600; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; display: flex; gap: 7px; align-items: center; min-width: 0;
 }
+.model-row-title > svg, .model-row-title > img { width: 16px; height: 16px; flex: 0 0 16px; }
+.model-row-title .model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .chat-row-sub, .model-row-sub { grid-column: 1; color: var(--hint); font-size: 12.5px; }
 .chat-row-sub { display: flex; gap: 6px; align-items: center; min-width: 0; }
 .chat-row-sub .sub-model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-row-sub .sub-time { flex: 0 0 auto; opacity: .8; }
 .chat-del { grid-row: 1 / span 2; grid-column: 2; align-self: center; font-size: 12px; }
-.chat-del.armed { color: var(--err); border-color: var(--err); }
 .model-row.dead { opacity: .55; }
 .model-row.unstable { opacity: .85; }
 .model-row.cooldown { opacity: .75; }
+.model-row:disabled { cursor: not-allowed; opacity: .56; }
+.model-row:disabled:active { transform: none; }
+.model-row:disabled.active {
+  border-color: var(--hair); background: color-mix(in srgb, var(--surface-1) 55%, transparent);
+}
 .model-row .mr-check { flex: 0 0 auto; color: var(--accent); display: inline-flex; }
+.model-capability {
+  display: inline-flex; align-items: center; flex: 0 0 auto;
+  padding: 2px 7px; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--hair));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-1));
+  color: var(--accent); font-size: 11.5px; line-height: 1.3; font-weight: 650;
+}
 
-/* статус-индикатор модели: честная точка вместо «процентов здоровья» */
+/* Статус-индикатор модели: честная точка вместо «процентов здоровья». */
 .st-dot { grid-row: 1 / span 2; grid-column: 2; align-self: center; width: 9px; height: 9px; border-radius: 50%; }
 .st-dot.st-ok { background: var(--ok); box-shadow: 0 0 8px color-mix(in srgb, var(--ok) 55%, transparent); }
 .st-dot.st-new { background: var(--link); box-shadow: 0 0 8px color-mix(in srgb, var(--link) 45%, transparent); }
 .st-dot.st-unstable { background: var(--warn-c); box-shadow: 0 0 8px color-mix(in srgb, var(--warn-c) 45%, transparent); }
 .st-dot.st-cooldown { background: #ff9f43; box-shadow: 0 0 8px rgba(255, 159, 67, .45); }
 .st-dot.st-dead { background: var(--err); opacity: .55; }
+.st-dot.st-unknown { background: var(--hint); opacity: .6; }
 
 /* скелетон, пока модель-лист пуст */
 .sk-row {
@@ -822,6 +843,12 @@ body::before {
   padding: 2px 9px; font-size: 11.5px; letter-spacing: .04em;
 }
 .soon-row { color: var(--hint); font-size: 12.5px; padding: 4px 6px 8px; }
+.model-recommend-hint {
+  margin: 0 0 8px; padding: 10px 12px; border-radius: 13px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--hair));
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface-1));
+  color: var(--hint); font-size: 12.5px; line-height: 1.45;
+}
 .tab-in { animation: tab-in .28s var(--ease) both; }
 @keyframes tab-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .soon-tile {
@@ -851,10 +878,6 @@ body::before {
 .soon-tile-big .soon-tile-tx { flex: 0 0 auto; align-items: center; gap: 3px; }
 .soon-tile-big .soon-tile-tx b { font-size: 15px; }
 .soon-tile-big .soon-tile-tx small { max-width: 260px; }
-.vis-dot {
-  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
-  background: var(--ok); box-shadow: 0 0 6px var(--ok);
-}
 .ic-pin { flex: 0 0 12px; opacity: .7; }
 .brand-word .brand-name { font-weight: inherit; }
 

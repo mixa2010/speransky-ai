@@ -260,6 +260,81 @@ function addCodeCopy(root) {
   });
 }
 
+/* `marked` intentionally supports raw HTML, so its output is untrusted even
+   when it came from a model. Keep only the small HTML subset used by chat
+   Markdown; strip event/style attributes and reject scriptable URL schemes. */
+const RICH_TAGS = new Set([
+  'p', 'br', 'hr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote',
+  'ul', 'ol', 'li', 'strong', 'em', 'del', 's', 'code', 'pre', 'a', 'img',
+  'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td',
+]);
+const RICH_DROP_TAGS = new Set([
+  'script', 'style', 'iframe', 'object', 'embed', 'svg', 'math', 'form',
+  'input', 'button', 'video', 'audio', 'source', 'canvas', 'template',
+]);
+
+function safeRichUrl(value, allowMailto) {
+  const raw = String(value || '').trim();
+  if (!raw || /[\x00-\x1f\x7f]/.test(raw)) return '';
+  try {
+    const url = new URL(raw, document.baseURI || location.href);
+    if (url.protocol === 'http:' || url.protocol === 'https:' ||
+        (allowMailto && (url.protocol === 'mailto:' || url.protocol === 'tel:'))) return raw;
+  } catch (e) { /* invalid URL */ }
+  return '';
+}
+
+function sanitizeRichHtml(html) {
+  const template = document.createElement('template');
+  template.innerHTML = String(html || '');
+  for (const el of Array.from(template.content.querySelectorAll('*'))) {
+    if (!template.content.contains(el)) continue; // ancestor already removed
+    const tag = el.tagName.toLowerCase();
+    if (!RICH_TAGS.has(tag)) {
+      if (RICH_DROP_TAGS.has(tag)) {
+        el.remove();
+      } else {
+        // Keep readable text from harmless formatting elements, but not the tag.
+        const parent = el.parentNode;
+        while (el.firstChild) parent.insertBefore(el.firstChild, el);
+        el.remove();
+      }
+      continue;
+    }
+
+    for (const attr of Array.from(el.attributes)) {
+      const name = attr.name.toLowerCase();
+      const keep = name === 'title' ||
+        (tag === 'a' && (name === 'href' || name === 'target')) ||
+        (tag === 'img' && (name === 'src' || name === 'alt')) ||
+        ((tag === 'th' || tag === 'td') && name === 'align' &&
+          /^(left|center|right)$/i.test(attr.value));
+      if (!keep) el.removeAttribute(attr.name);
+    }
+
+    if (tag === 'a') {
+      const href = safeRichUrl(el.getAttribute('href'), true);
+      if (href) el.setAttribute('href', href);
+      else el.removeAttribute('href');
+      if (el.getAttribute('target') === '_blank' && href) {
+        el.setAttribute('rel', 'noopener noreferrer');
+      } else {
+        el.removeAttribute('target');
+      }
+    } else if (tag === 'img') {
+      const src = safeRichUrl(el.getAttribute('src'), false);
+      if (!src) {
+        el.remove();
+        continue;
+      }
+      el.setAttribute('src', src);
+      el.setAttribute('loading', 'lazy');
+      el.setAttribute('referrerpolicy', 'no-referrer');
+    }
+  }
+  return template.content;
+}
+
 function renderRich(container, text) {
   const math = extractMath(text);
   let html;
@@ -272,7 +347,8 @@ function renderRich(container, text) {
   } else {
     html = miniMarkdown(math.text);
   }
-  container.innerHTML = html;
+  container.textContent = '';
+  container.appendChild(sanitizeRichHtml(html));
   renderMathInto(container, math.store);
   healKatexErrors(container);
   scrubLatexLeftovers(container);

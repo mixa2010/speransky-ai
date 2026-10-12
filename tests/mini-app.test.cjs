@@ -237,6 +237,21 @@ test('models sheet has search, skeleton and a check on the current model', () =>
   assert.match(app, /renderModelsList/);
 });
 
+test('model chooser keeps all requested categories and disables unavailable models', () => {
+  const list = fs.readFileSync(path.join(root, 'js/models-list.js'), 'utf8');
+  for (const category of ['recommended', 'all', 'code', 'image', 'video']) {
+    assert.match(list, new RegExp(`id: '${category}'`), `${category} category is retained`);
+  }
+  assert.match(app, /modelTab: 'recommended'/);
+  assert.match(list, /m\.available !== false/);
+  assert.match(list, /toLowerCase\(\) !== 'dead'/);
+  assert.match(list, /row\.disabled = !selectable/);
+  assert.match(list, /model-recommend-hint/);
+  assert.match(list, /model-capability/);
+  assert.match(css, /\.model-recommend-hint/);
+  assert.match(css, /\.model-capability/);
+});
+
 test('sheets can be swiped away by the handle only', () => {
   assert.match(html, /class="sheet-grab"/);
   assert.match(app, /enableDragClose\(/);
