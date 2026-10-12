@@ -12,3 +12,11 @@ const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp 
 const INIT_DATA = (tg && tg.initData) || _params.get('initData') || '';
 const $ = (s) => document.querySelector(s);
 
+/* Язык Mini App уходит с каждым запросом (`lang`): тексты, которые сервер
+   возвращает в message/error/referral_note, должны быть на том же языке,
+   что и интерфейс. getLanguage() объявлен в js/i18n.js — он грузится раньше. */
+const uiLang = () => {
+  try { return typeof getLanguage === 'function' ? getLanguage() : 'en'; }
+  catch (e) { return 'en'; }
+};
+

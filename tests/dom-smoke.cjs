@@ -58,19 +58,36 @@ function makeWindow(handler, opts) {
   const w = dom.window;
   if (opts && opts.prefs) w.localStorage.setItem('sp_prefs_v1', JSON.stringify(opts.prefs));
   if (!(opts && opts.noTelegram)) {
+    const tgCalls = [];
     w.Telegram = { WebApp: {
       initData: 'test', colorScheme: 'dark', initDataUnsafe: { user: { first_name: 'Миша' } },
       ready() {}, expand() {}, setHeaderColor() {}, disableVerticalSwipes() {}, onEvent() {},
       HapticFeedback: { impactOccurred() {}, selectionChanged() {}, notificationOccurred() {} },
-      openTelegramLink() {}, openLink() {},
+      openTelegramLink(u) { tgCalls.push({ kind: 'telegram', url: String(u) }); },
+      openLink(u) { tgCalls.push({ kind: 'link', url: String(u) }); },
     } };
+    w.__tgCalls = tgCalls;
   }
-  w.fetch = (u, o) => handler(String(u), o || {});
+  w.__requests = [];
+  w.fetch = (u, o) => {
+    w.__requests.push({ url: String(u), body: (o && o.body) || null });
+    return handler(String(u), o || {});
+  };
   w.TextEncoder = TextEncoder;
   w.TextDecoder = TextDecoder;
   vc.on('jsdomError', (e) => problems.push('jsdomError: ' + e.message));
   w.eval(APP);
   return w;
+}
+
+/* Буфер обмена в jsdom отсутствует — сценарии копирования пишут сюда. */
+function stubClipboard(w) {
+  const copied = [];
+  Object.defineProperty(w.navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText: async (text) => { copied.push(String(text)); } },
+  });
+  return copied;
 }
 
 const MODELS = [
@@ -709,6 +726,306 @@ async function gates() {
   }
 }
 
+/* ================= экран «Лимиты и приглашения» ================= */
+const LIMITS_POLICY = {
+  free: true,
+  left_day: 17, daily_limit: 25,
+  base_daily_limit: 10, base_total_daily_limit: 25,
+  subscribed_daily_limit: 50, subscribed_total_daily_limit: 65,
+  subscribed: false, subscription_available: true,
+  channel_url: 'https://t.me/speransky_channel',
+  referral_count: 3, referral_bonus_daily: 15, referral_bonus_per_friend: 5,
+  referral_link: 'https://t.me/speransky_ai_bot?start=ref_123',
+  referral_available: true,
+  referral_note: 'Друг получает +5 запросов, и ты тоже.',
+};
+
+/* boot.policy и /api/quota отдают серверные поля квоты и рефералов. */
+function limitsServer(overrides) {
+  const policy = Object.assign({}, LIMITS_POLICY, overrides || {});
+  return (u, o) => {
+    const method = (o && o.method) || 'GET';
+    if (u.includes('/api/boot')) {
+      return Promise.resolve(json({ models: MODELS, chats: [], policy }));
+    }
+    if (u.includes('/api/quota')) return Promise.resolve(json(policy));
+    if (u.includes('/api/chat')) {
+      return Promise.resolve(json({ reply: 'Привет!', provider: 'gemini',
+        model: 'gemini-2.5-flash', filtered: false, fallbacks: [] }));
+    }
+    if (/\/api\/chats(\/|$|\?)/.test(u) && method === 'POST') {
+      return Promise.resolve(json({ id: 'n1', title: 'Новый чат',
+        model: 'gemini/gemini-2.5-flash', updated_at: new Date().toISOString() }));
+    }
+    return Promise.resolve(json({}));
+  };
+}
+
+/* Пилюля остатка в меню чатов — вход на экран лимитов. */
+async function openLimitsViaDrawer(w) {
+  const d = w.document;
+  d.querySelector('#btn-chats').click();
+  await sleep(20);
+  d.querySelector('#quota-pill').click();
+  await sleep(60);
+  return d;
+}
+
+async function limitsWithFriends() {
+  const w = makeWindow(limitsServer());
+  const copied = stubClipboard(w);
+  await sleep(90);
+  const d = await openLimitsViaDrawer(w);
+  const $ = (s) => d.querySelector(s);
+  check('экран лимитов открывается из пилюли остатка и закрывает меню чатов',
+    $('#limits-sheet').hidden === false && $('#chats-sheet').hidden === true,
+    'limits.hidden=' + $('#limits-sheet').hidden);
+  check('остаток запросов и доля дневного лимита',
+    $('#limits-left').textContent === '17' &&
+      /out of 25 per day/.test($('#limits-left-note').textContent) &&
+      $('#limits-bar-fill').style.width === '68%',
+    $('#limits-left').textContent + ' / ' + $('#limits-left-note').textContent +
+      ' / ' + $('#limits-bar-fill').style.width);
+  check('разложение лимита: 10 базовых + 5 за каждого из трёх друзей = 25',
+    $('#limits-base-val').textContent === '10 requests' &&
+      $('#limits-friends-val').textContent === '+15 (3 × 5)' &&
+      $('#limits-total-val').textContent === '25 requests',
+    [$('#limits-base-val').textContent, $('#limits-friends-val').textContent,
+      $('#limits-total-val').textContent].join(' | '));
+  check('число приглашённых друзей с правильной формой слова',
+    $('#limits-invited-val').textContent === '3 friends',
+    $('#limits-invited-val').textContent);
+  check('личная ссылка показана целиком',
+    $('#limits-link-box').hidden === false &&
+      $('#limits-link-tx').textContent === LIMITS_POLICY.referral_link,
+    $('#limits-link-tx').textContent);
+  check('заметка сервера о рефералах видна',
+    $('#limits-referral-note').hidden === false &&
+      /Друг получает/.test($('#limits-referral-note').textContent),
+    $('#limits-referral-note').textContent);
+  $('#limits-copy').click();
+  await sleep(40);
+  check('копирование личной ссылки',
+    copied[0] === LIMITS_POLICY.referral_link &&
+      /Invite link copied/.test($('#warn').textContent),
+    JSON.stringify(copied) + ' / ' + $('#warn').textContent);
+  $('#limits-share').click();
+  await sleep(20);
+  const share = w.__tgCalls[w.__tgCalls.length - 1];
+  check('«Поделиться» открывает диалог Telegram со ссылкой и текстом',
+    !!share && share.kind === 'telegram' &&
+      share.url.indexOf('https://t.me/share/url?url=') === 0 &&
+      share.url.includes(encodeURIComponent(LIMITS_POLICY.referral_link)) &&
+      /&text=.+/.test(share.url),
+    JSON.stringify(share));
+  check('блок подписки виден при subscription_available = true',
+    $('#limits-subscribe').hidden === false && $('#limits-sub-cta').hidden === false &&
+      /50 requests per day instead of 10/.test($('#limits-sub-text').textContent),
+    $('#limits-sub-text').textContent);
+  w.__tgCalls.length = 0;
+  $('#limits-sub-cta').click();
+  await sleep(20);
+  check('кнопка подписки ведёт на channel_url сервера',
+    w.__tgCalls.some((c) => c.url === LIMITS_POLICY.channel_url),
+    JSON.stringify(w.__tgCalls));
+}
+
+async function limitsWithoutFriends() {
+  const w = makeWindow(limitsServer({ referral_count: 0, referral_bonus_daily: 0,
+    base_total_daily_limit: 10, daily_limit: 10, left_day: 4 }));
+  await sleep(90);
+  const d = await openLimitsViaDrawer(w);
+  const $ = (s) => d.querySelector(s);
+  check('без друзей лимит остаётся базовым',
+    $('#limits-left').textContent === '4' &&
+      $('#limits-base-val').textContent === '10 requests' &&
+      $('#limits-total-val').textContent === '10 requests',
+    $('#limits-left').textContent + ' / ' + $('#limits-base-val').textContent +
+      ' / ' + $('#limits-total-val').textContent);
+  check('без друзей строка приглашений объясняет бонус, а не пустая',
+    /no friends yet/.test($('#limits-friends-val').textContent) &&
+      /\+5 per friend/.test($('#limits-friends-val').textContent) &&
+      $('#limits-invited-val').textContent === '0 friends',
+    $('#limits-friends-val').textContent + ' / ' + $('#limits-invited-val').textContent);
+  check('подсказка поделиться ссылкой видна только без друзей',
+    $('#limits-breakdown-note').hidden === false &&
+      /share your link/.test($('#limits-breakdown-note').textContent),
+    $('#limits-breakdown-note').textContent);
+  check('малый остаток подсвечен на полосе и в счётчике',
+    $('#limits-bar').classList.contains('low') &&
+      $('.limits-hero').classList.contains('low'), 'нет подсветки');
+}
+
+async function limitsWithoutLink() {
+  {
+    const w = makeWindow(limitsServer({ referral_link: '' }));
+    await sleep(90);
+    const d = await openLimitsViaDrawer(w);
+    const $ = (s) => d.querySelector(s);
+    check('без ссылки блок копирования скрыт, показано резервное сообщение',
+      $('#limits-link-box').hidden === true && $('#limits-no-link').hidden === false &&
+        /invite link isn’t ready yet/.test($('#limits-no-link').textContent),
+      $('#limits-no-link').textContent);
+    check('кнопки «Скопировать» и «Поделиться» живут внутри скрытого блока',
+      $('#limits-link-box').contains($('#limits-copy')) &&
+        $('#limits-link-box').contains($('#limits-share')), 'кнопки снаружи');
+  }
+  {
+    /* сервер выключил приглашения — отдельное понятное сообщение */
+    const w = makeWindow(limitsServer({ referral_link: '', referral_available: false }));
+    await sleep(90);
+    const d = await openLimitsViaDrawer(w);
+    check('при referral_available = false объясняем, что приглашения выключены',
+      /Invites are temporarily unavailable/.test(
+        d.querySelector('#limits-no-link').textContent) &&
+        d.querySelector('#limits-link-box').hidden === true,
+      d.querySelector('#limits-no-link').textContent);
+    check('выключенные приглашения не мешают пользоваться приложением',
+      d.querySelector('#fatal').hidden === true &&
+        d.querySelector('#composer').hidden === false, 'доступ закрыт');
+  }
+  {
+    /* опасная или мусорная ссылка считается отсутствующей */
+    const w = makeWindow(limitsServer({ referral_link: 'javascript:alert(1)' }));
+    await sleep(90);
+    const d = await openLimitsViaDrawer(w);
+    check('не-http ссылка не попадает в экран',
+      d.querySelector('#limits-link-box').hidden === true &&
+        d.querySelector('#limits-no-link').hidden === false &&
+        !/javascript:/i.test(d.querySelector('#limits-sheet').textContent),
+      d.querySelector('#limits-link-tx').textContent);
+  }
+}
+
+async function limitsSubscriptionGating() {
+  {
+    const w = makeWindow(limitsServer({ subscription_available: false }));
+    await sleep(90);
+    const d = w.document;
+    check('подписка не требуется для доступа к приложению',
+      d.querySelector('#fatal').hidden === true &&
+        d.querySelector('#composer').hidden === false &&
+        d.querySelector('#head').hidden === false, 'экран отказа вместо чата');
+    await openLimitsViaDrawer(w);
+    check('блок подписки скрыт при subscription_available = false',
+      d.querySelector('#limits-subscribe').hidden === true &&
+        d.querySelector('#limits-sheet').hidden === false, 'блок виден');
+  }
+  {
+    const w = makeWindow(limitsServer({ subscribed: true, referral_count: 2,
+      referral_bonus_daily: 10, subscribed_total_daily_limit: 60,
+      daily_limit: 60, left_day: 55 }));
+    await sleep(90);
+    const d = await openLimitsViaDrawer(w);
+    const $ = (s) => d.querySelector(s);
+    check('с подтверждённой подпиской база 50 и сумма 60',
+      $('#limits-base-label').textContent === 'Base limit (subscription confirmed)' &&
+        $('#limits-base-val').textContent === '50 requests' &&
+        $('#limits-friends-val').textContent === '+10 (2 × 5)' &&
+        $('#limits-total-val').textContent === '60 requests',
+      [$('#limits-base-label').textContent, $('#limits-base-val').textContent,
+        $('#limits-friends-val').textContent, $('#limits-total-val').textContent].join(' | '));
+    check('подписка подтверждена: состояние вместо призыва, кнопки канала нет',
+      $('#limits-subscribe').hidden === false &&
+        $('#limits-sub-title').textContent === 'Subscription is confirmed' &&
+        /already get 50 requests per day/.test($('#limits-sub-text').textContent) &&
+        $('#limits-sub-cta').hidden === true && $('#limits-no-channel').hidden === true,
+      $('#limits-sub-title').textContent + ' / ' + $('#limits-sub-text').textContent);
+  }
+  {
+    const w = makeWindow(limitsServer({ channel_url: '' }));
+    await sleep(90);
+    const d = await openLimitsViaDrawer(w);
+    check('без channel_url показываем сообщение вместо мёртвой кнопки',
+      d.querySelector('#limits-sub-cta').hidden === true &&
+        d.querySelector('#limits-no-channel').hidden === false &&
+        /channel link isn’t available/.test(d.querySelector('#limits-no-channel').textContent),
+      d.querySelector('#limits-no-channel').textContent);
+  }
+}
+
+async function limitsInNineLanguages() {
+  const w = makeWindow(limitsServer());
+  await sleep(90);
+  const d = w.document;
+  const titles = {
+    en: 'Limits & invites', ru: 'Лимиты и приглашения', es: 'Límites e invitaciones',
+    pt: 'Limites e convites', fr: 'Limites et invitations', de: 'Limits & Einladungen',
+    hi: 'सीमाएँ और आमंत्रण', zh: '额度与邀请', ar: 'الحدود والدعوات',
+  };
+  for (const code of Object.keys(titles)) {
+    d.querySelector('#btn-chats').click();
+    d.querySelector('#btn-settings').click();
+    await sleep(20);
+    d.querySelector('#set-language').click();
+    d.querySelector(`[data-language-opt="${code}"]`).click();
+    await sleep(20);
+    d.querySelector('#set-limits').click();     // строка настроек ведёт на экран
+    await sleep(60);
+    const sheet = d.querySelector('#limits-sheet');
+    const text = sheet.textContent;
+    const title = sheet.querySelector('.sheet-head span').textContent;
+    check(`экран лимитов полностью переведён на ${code}`,
+      sheet.hidden === false && title === titles[code] &&
+        !/limits\.[a-zA-Z]/.test(text) && !/quota\.[a-zA-Z]/.test(text) &&
+        text.length > 90,
+      title + ' | ' + text.slice(0, 110));
+    if (code === 'ru') {
+      check('русские формы слов: 3 друга и 25 запросов',
+        /3 друга/.test(sheet.querySelector('#limits-invited-val').textContent) &&
+          /25 запросов/.test(sheet.querySelector('#limits-total-val').textContent),
+        sheet.querySelector('#limits-invited-val').textContent + ' / ' +
+          sheet.querySelector('#limits-total-val').textContent);
+    }
+    if (code === 'ar') {
+      check('арабский переключает направление и оставляет ссылку читаемой',
+        d.documentElement.dir === 'rtl' &&
+          sheet.querySelector('#limits-link-tx').textContent === LIMITS_POLICY.referral_link,
+        d.documentElement.dir);
+    }
+    sheet.querySelector('.sheet-close').click();
+    await sleep(20);
+  }
+}
+
+async function langGoesToServer() {
+  const w = makeWindow(limitsServer());
+  await sleep(90);
+  const d = w.document;
+  const gets = w.__requests.filter((r) => /\/api\/(boot|quota)/.test(r.url));
+  check('выбранный язык уходит в GET-запросы',
+    gets.length >= 2 && gets.every((r) => /[?&]lang=en(&|$)/.test(r.url)),
+    gets.map((r) => r.url.split('?')[1] || r.url).join(' | '));
+  d.querySelector('#btn-chats').click();
+  d.querySelector('#btn-settings').click();
+  await sleep(20);
+  d.querySelector('#set-language').click();
+  d.querySelector('[data-language-opt="ru"]').click();
+  await sleep(20);
+  d.querySelector('#set-limits').click();
+  await sleep(50);
+  d.querySelector('#limits-refresh').click();
+  await sleep(70);
+  const lastQuota = w.__requests.filter((r) => r.url.includes('/api/quota')).pop();
+  check('после смены языка квота запрашивается с lang=ru',
+    !!lastQuota && /[?&]lang=ru(&|$)/.test(lastQuota.url), lastQuota && lastQuota.url);
+  check('обновление экрана подтверждается тостом на русском',
+    /Лимиты обновлены/.test(d.querySelector('#warn').textContent),
+    d.querySelector('#warn').textContent);
+  d.querySelector('#limits-sheet .sheet-close').click();
+  await sleep(20);
+  d.querySelector('#input').value = 'привет';
+  d.querySelector('#input').dispatchEvent(new w.Event('input'));
+  d.querySelector('#btn-send').click();
+  await sleep(200);
+  const bodies = w.__requests.filter((r) => r.body).map((r) => JSON.parse(r.body));
+  const chatBody = bodies.filter((b) => Array.isArray(b.messages)).pop();
+  const createBody = bodies.filter((b) => typeof b.title === 'string').pop();
+  check('язык уходит и в тело POST-запросов',
+    !!chatBody && chatBody.lang === 'ru' && !!createBody && createBody.lang === 'ru',
+    JSON.stringify({ chat: chatBody && chatBody.lang, create: createBody && createBody.lang }));
+}
+
 (async () => {
   markdownSafety();
   await happyPath();
@@ -720,6 +1037,12 @@ async function gates() {
   await streamSilenceTimesOut();
   await emptyState();
   await restoredLanguage();
+  await limitsWithFriends();
+  await limitsWithoutFriends();
+  await limitsWithoutLink();
+  await limitsSubscriptionGating();
+  await limitsInNineLanguages();
+  await langGoesToServer();
   await gates();
   console.log(problems.length ? '\nПРОБЛЕМЫ:\n' + problems.join('\n') : '\nВсё чисто.');
   process.exit(problems.length ? 1 : 0);

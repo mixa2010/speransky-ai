@@ -984,6 +984,17 @@ body::before {
   font-size: 12px; font-weight: 600; border: 1px solid var(--hair);
   border-radius: 999px; padding: 3px 10px; margin-bottom: 8px;
 }
+/* пилюля остатка — вход в экран «Лимиты и приглашения»: выглядит кнопкой */
+button.quota-pill {
+  font-family: inherit; background: transparent; cursor: pointer;
+  transition: transform .16s var(--ease), border-color .16s var(--ease);
+}
+button.quota-pill:active { transform: scale(.96); }
+button.quota-pill::after {
+  content: ""; width: 5px; height: 5px; flex: 0 0 5px;
+  border-top: 1.5px solid currentColor; border-right: 1.5px solid currentColor;
+  transform: rotate(45deg); opacity: .65; margin-left: 1px;
+}
 .quota-pill.low { color: var(--warn-c); border-color: color-mix(in srgb, var(--warn-c) 45%, transparent); }
 .quota-pill.inf { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .drawer-foot-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -1138,6 +1149,73 @@ body::before {
 .white-pill:active { transform: scale(.97); }
 
 /* ============================================================
+   ЭКРАН «ЛИМИТЫ И ПРИГЛАШЕНИЯ»
+   ============================================================ */
+.limits-body { top: 10vh; }
+.limits-scroll {
+  flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain;
+  padding: 0 0 calc(20px + var(--safe-b));
+}
+.limits-hero {
+  display: flex; align-items: center; gap: 16px; margin: 14px 14px 0;
+  padding: 16px 18px; border-radius: 18px;
+  background: var(--group); border: 1px solid var(--hair);
+}
+:root[data-theme="light"] .limits-hero { box-shadow: 0 2px 10px rgba(19, 23, 34, .06); }
+.limits-count {
+  flex: 0 0 auto; min-width: 76px; text-align: center;
+  font-size: 40px; font-weight: 800; line-height: 1; letter-spacing: -.03em;
+  color: var(--accent); font-variant-numeric: tabular-nums;
+}
+.limits-hero.low .limits-count { color: var(--warn-c); }
+.limits-hero.spent .limits-count { color: var(--err); }
+.limits-hero.inf .limits-count { font-size: 32px; }
+.limits-hero-tx { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.limits-hero-tx b { font-size: 15.5px; font-weight: 700; letter-spacing: -.01em; }
+.limits-hero-tx small { color: var(--hint); font-size: 13px; line-height: 1.4; }
+.limits-bar {
+  height: 6px; margin: 10px 14px 0; border-radius: 999px;
+  background: var(--hair); overflow: hidden;
+}
+.limits-bar i {
+  display: block; height: 100%; width: 0; border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  transition: width .45s var(--ease);
+}
+.limits-bar.low i { background: linear-gradient(90deg, var(--warn-c), var(--err)); }
+.limits-row-total .set-val { color: var(--text); font-weight: 700; }
+.limits-note { color: var(--hint); font-size: 13px; line-height: 1.45; margin: 9px 18px 0; }
+.limits-note-card { margin: 0; padding: 11px 16px; border-top: 1px solid var(--hair); }
+.limits-link { padding: 12px 16px 14px; border-top: 1px solid var(--hair); }
+.limits-link-label {
+  color: var(--hint); font-size: 12.5px; font-weight: 650; margin-bottom: 6px;
+}
+.limits-link-tx {
+  direction: ltr; text-align: left; word-break: break-all;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.45; color: var(--text);
+  background: color-mix(in srgb, var(--surface-1) 62%, transparent);
+  border: 1px solid var(--hair); border-radius: 12px; padding: 10px 12px;
+}
+.limits-link-actions { display: flex; gap: 8px; margin-top: 10px; }
+.limits-btn {
+  flex: 1 1 0; min-width: 0; border: 1px solid var(--hair); background: var(--glass-2);
+  color: var(--text); border-radius: 12px; padding: 11px 12px;
+  font-family: inherit; font-size: 14.5px; font-weight: 650; cursor: pointer;
+  transition: transform .16s var(--ease), border-color .16s var(--ease);
+}
+.limits-btn:active { transform: scale(.97); }
+.limits-btn-accent {
+  border-color: transparent; color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.limits-sub { padding: 14px 16px 16px; }
+.limits-sub-tx b { display: block; font-size: 15.5px; margin-bottom: 4px; }
+.limits-sub-tx small { color: var(--hint); font-size: 13.5px; line-height: 1.45; }
+.limits-sub-cta { margin-top: 13px; padding: 13px; font-size: 15px; }
+.limits-sub .limits-note-card { border-top: 0; margin: 0; padding: 10px 0 0; }
+
+/* ============================================================
    МЕНЮ ЧАТА
    ============================================================ */
 .menu-scrim { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, .28); animation: fade-in .16s var(--ease); }
@@ -1251,6 +1329,9 @@ body::before {
 :root[dir="rtl"] .cm-row { text-align: right; }
 :root[dir="rtl"] .set-val::after,
 :root[dir="rtl"] .set-chev { margin-left: 0; margin-right: 2px; transform: rotate(225deg); }
+:root[dir="rtl"] button.quota-pill::after {
+  margin-left: 0; margin-right: 1px; transform: rotate(225deg);
+}
 :root[dir="rtl"] .chat-menu { right: auto; left: 10px; }
 :root[dir="rtl"] .warn { padding: 12px 36px 12px 15px; }
 :root[dir="rtl"] .warn::before { left: auto; right: 14px; }
