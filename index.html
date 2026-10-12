@@ -19,19 +19,19 @@
         crossorigin="anonymous"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"
         crossorigin="anonymous"></script>
-<script defer src="js/i18n.js?v=20261012c"></script>
-<script defer src="js/config.js?v=20261012c"></script>
-<script defer src="js/api.js?v=20261012c"></script>
-<script defer src="js/logos.js?v=20261012c"></script>
-<script defer src="js/brand.js?v=20261012c"></script>
-<script defer src="js/render.js?v=20261012c"></script>
-<script defer src="js/ui.js?v=20261012c"></script>
-<script defer src="js/icons.js?v=20261012c"></script>
-<script defer src="js/models.js?v=20261012c"></script>
-<script defer src="js/models-list.js?v=20261012c"></script>
-<script defer src="app.js?v=20261012c"></script>
+<script defer src="js/i18n.js?v=20261012d"></script>
+<script defer src="js/config.js?v=20261012d"></script>
+<script defer src="js/api.js?v=20261012d"></script>
+<script defer src="js/logos.js?v=20261012d"></script>
+<script defer src="js/brand.js?v=20261012d"></script>
+<script defer src="js/render.js?v=20261012d"></script>
+<script defer src="js/ui.js?v=20261012d"></script>
+<script defer src="js/icons.js?v=20261012d"></script>
+<script defer src="js/models.js?v=20261012d"></script>
+<script defer src="js/models-list.js?v=20261012d"></script>
+<script defer src="app.js?v=20261012d"></script>
 
-<link rel="stylesheet" href="style.css?v=20261012c">
+<link rel="stylesheet" href="style.css?v=20261012d">
 </head>
 <body>
 
@@ -155,9 +155,9 @@
         <span class="soon-tag" data-i18n="nav.soon">Soon</span>
       </div>
       <button id="support-row" class="support-row" type="button" hidden></button>
-      <span id="quota-pill" class="quota-pill" hidden></span>
+      <button id="quota-pill" class="quota-pill" type="button" hidden title="Limits and invites" aria-label="Limits and invites" data-i18n-title="limits.open" data-i18n-aria-label="limits.open"></button>
       <span class="drawer-foot-row">
-        <span class="drawer-foot-note">v<span id="set-version-mini">20261012c</span></span>
+        <span class="drawer-foot-note">v<span id="set-version-mini">20261012d</span></span>
         <button id="btn-settings" class="round-btn" title="Settings" aria-label="Settings" data-i18n-title="settings.title" data-i18n-aria-label="settings.title"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8l1.2 2.6 2.8-.6 1 2.7 2.8.7-.6 2.8 2 2-2 2 .6 2.8-2.8.7-1 2.7-2.8-.6L12 21.2l-1.2-2.6-2.8.6-1-2.7-2.8-.7.6-2.8-2-2 2-2-.6-2.8 2.8-.7 1-2.7 2.8.6z"/></svg></button>
       </span>
     </div>
@@ -241,6 +241,13 @@
         <span data-i18n="settings.defaultModel">Default model</span><span class="set-val" id="set-model-val">Auto</span>
       </button>
     </div>
+    <div class="set-section" data-i18n="limits.title">Limits &amp; invites</div>
+    <div class="set-card">
+      <button class="set-row" id="set-limits">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>
+        <span data-i18n="limits.leftToday">Requests left today</span><span class="set-val" id="set-limits-val">—</span>
+      </button>
+    </div>
     <div class="set-section" id="set-stats-sec" hidden data-i18n="settings.project">Project</div>
     <div class="set-card" id="set-stats" hidden>
       <div class="set-row set-row-static">
@@ -270,7 +277,7 @@
     <div class="set-card set-about">
       <div class="set-row set-row-static">
         <span class="logo logo-about" data-logo aria-hidden="true"></span>
-        <span data-i18n="app.title">Speransky AI</span><span class="set-val" id="set-version">20261012c</span>
+        <span data-i18n="app.title">Speransky AI</span><span class="set-val" id="set-version">20261012d</span>
       </div>
     </div>
   </div>
@@ -297,6 +304,82 @@
       <div><b data-i18n="data.photosTitle">Photos are used only to answer</b><small data-i18n="data.photosText">A photo is sent to the model to understand your question and is not used elsewhere.</small></div>
     </div>
     <button id="data-ok" class="white-pill" data-i18n="data.gotIt">Got it, let’s go</button>
+  </div>
+</div>
+
+<!-- лимиты и приглашения: остаток запросов, разложение лимита, реферальная ссылка -->
+<div id="limits-sheet" class="sheet" role="dialog" aria-modal="true" aria-label="Limits and invites" data-i18n-aria-label="limits.title" hidden>
+  <div class="sheet-back"></div>
+  <div class="sheet-body limits-body">
+    <div class="sheet-grab" aria-hidden="true"></div>
+    <div class="sheet-head">
+      <span data-i18n="limits.title">Limits &amp; invites</span>
+      <span class="sheet-head-actions">
+        <button id="limits-refresh" class="icon-btn" type="button" title="Update" aria-label="Update" data-i18n-title="limits.refresh" data-i18n-aria-label="limits.refresh"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4.5h-4.5"/></svg></button>
+        <button class="icon-btn sheet-close" type="button" aria-label="Close" data-i18n-aria-label="action.close"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      </span>
+    </div>
+    <div class="limits-scroll">
+      <!-- остаток на сегодня -->
+      <div class="limits-hero">
+        <div class="limits-count" id="limits-left" aria-hidden="true">—</div>
+        <div class="limits-hero-tx">
+          <b id="limits-left-label" data-i18n="limits.leftToday">Requests left today</b>
+          <small id="limits-left-note">—</small>
+        </div>
+      </div>
+      <div class="limits-bar" id="limits-bar" role="img" aria-hidden="true"><i id="limits-bar-fill"></i></div>
+
+      <!-- из чего складывается лимит -->
+      <div class="set-section" data-i18n="limits.breakdown">How your limit is built</div>
+      <div class="set-card">
+        <div class="set-row set-row-static">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.2 7.8-8 9-4.8-1.2-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg>
+          <span id="limits-base-label" data-i18n="limits.baseRow">Base limit</span><span class="set-val" id="limits-base-val">—</span>
+        </div>
+        <div class="set-row set-row-static">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11a3 3 0 1 0 6 0 3 3 0 0 0-6 0z"/><path d="M4 20c.8-3.2 3.2-5 8-5s7.2 1.8 8 5"/><circle cx="17.5" cy="8.5" r="2.2"/><circle cx="6.5" cy="8.5" r="2.2"/></svg>
+          <span data-i18n="limits.friendsRow">Invited friends</span><span class="set-val" id="limits-friends-val">—</span>
+        </div>
+        <div class="set-row set-row-static limits-row-total">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>
+          <span data-i18n="limits.totalRow">Total per day</span><span class="set-val" id="limits-total-val">—</span>
+        </div>
+      </div>
+      <p class="limits-note" id="limits-breakdown-note" hidden></p>
+
+      <!-- приглашения -->
+      <div class="set-section" data-i18n="limits.invites">Invites</div>
+      <div class="set-card">
+        <div class="set-row set-row-static">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M6 11H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-1"/></svg>
+          <span data-i18n="limits.invitedRow">Friends you invited</span><span class="set-val" id="limits-invited-val">—</span>
+        </div>
+        <div class="limits-link" id="limits-link-box" hidden>
+          <div class="limits-link-label" data-i18n="limits.yourLink">Your invite link</div>
+          <div class="limits-link-tx" id="limits-link-tx"></div>
+          <div class="limits-link-actions">
+            <button id="limits-copy" class="limits-btn" type="button" data-i18n="limits.copyLink">Copy link</button>
+            <button id="limits-share" class="limits-btn limits-btn-accent" type="button" data-i18n="limits.shareTelegram">Share in Telegram</button>
+          </div>
+        </div>
+        <p class="limits-note limits-note-card" id="limits-no-link" hidden data-i18n="limits.noLink">Your invite link isn’t ready yet.</p>
+        <p class="limits-note limits-note-card" id="limits-referral-note" hidden></p>
+      </div>
+
+      <!-- подписка: показываем только когда сервер разрешает её предлагать -->
+      <div id="limits-subscribe" hidden>
+        <div class="set-section" data-i18n="limits.subscription">Subscription</div>
+        <div class="set-card limits-sub">
+          <div class="limits-sub-tx">
+            <b id="limits-sub-title" data-i18n="limits.subscribeTitle">Confirmed subscription</b>
+            <small id="limits-sub-text"></small>
+          </div>
+          <button id="limits-sub-cta" class="white-pill limits-sub-cta" type="button" data-i18n="limits.subscribeCta" hidden>Open the channel</button>
+          <p class="limits-note limits-note-card" id="limits-no-channel" hidden data-i18n="limits.noChannel">The channel link isn’t available right now.</p>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -345,7 +428,7 @@
 </div>
 
 <script>
-window.__NEED_APP_V = '20261012c';
+window.__NEED_APP_V = '20261012d';
 window.addEventListener('load', function () {
   if (window.__APP_V !== window.__NEED_APP_V) {
     var k = 'bust-' + window.__NEED_APP_V;

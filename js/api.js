@@ -79,12 +79,17 @@ function apiError(status, data) {
 /* ================= сеть ================= */
 async function api(method, path, body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  const lang = uiLang();
   const payload = body ? Object.assign({}, body) : {};
-  if (method !== 'GET' && method !== 'DELETE') payload.initData = INIT_DATA;
+  if (method !== 'GET' && method !== 'DELETE') {
+    payload.initData = INIT_DATA;
+    payload.lang = lang;                 // локализованные ответы сервера
+  }
   let url = API_BASE + path;
   if (method === 'GET' || method === 'DELETE') {
     url += (path.includes('?') ? '&' : '?') +
-           'initData=' + encodeURIComponent(INIT_DATA);
+           'initData=' + encodeURIComponent(INIT_DATA) +
+           '&lang=' + encodeURIComponent(lang);
   }
   if (method !== 'GET') opts.body = JSON.stringify(payload);
   let res;

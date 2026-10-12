@@ -220,6 +220,104 @@ test('no dead “скоро” menu rows: only real actions in the chat menu', (
   assert.match(app, /api\('PUT', `\/api\/chats\/\$\{cur\.id\}`, \{ title \}\)/);
 });
 
+/* ================= экран «Лимиты и приглашения» ================= */
+const LIMITS_SECTION = /\/\* ================= лимиты и приглашения =================[\s\S]*?\/\* ================= быстрые действия/;
+
+test('the limits screen shows what is left and how the daily limit is built', () => {
+  assert.match(html, /<div id="limits-sheet" class="sheet" role="dialog" aria-modal="true"/);
+  for (const id of ['limits-left', 'limits-left-note', 'limits-bar-fill', 'limits-base-val',
+                    'limits-friends-val', 'limits-total-val', 'limits-invited-val',
+                    'limits-link-tx', 'limits-copy', 'limits-share', 'limits-subscribe',
+                    'limits-refresh']) {
+    assert.match(html, new RegExp(`id="${id}"`), `${id} is part of the screen`);
+  }
+  assert.match(app, LIMITS_SECTION);
+  assert.match(app, /function limitsView\(\)/);
+  assert.match(app, /function renderLimits\(\)/);
+  /* 10 базовых, 50 с подтверждённой подпиской и +5 за каждого друга */
+  assert.match(app, /num\(src\.base_daily_limit, 10\)/);
+  assert.match(app, /num\(src\.subscribed_daily_limit/);
+  assert.match(app, /num\(src\.referral_bonus_per_friend, 5\)/);
+  assert.match(app, /num\(src\.referral_count, 0\)/);
+  assert.match(app, /num\(src\.daily_limit/);
+  assert.match(app, /num\(src\.left_day, null\)/);
+  assert.match(css, /\.limits-hero\s*\{/);
+  assert.match(css, /\.limits-btn-accent\s*\{/);
+  assert.match(css, /\.limits-bar i\s*\{/);
+});
+
+test('the screen is reachable and closes like every other sheet', () => {
+  assert.match(html, /<button id="quota-pill" class="quota-pill" type="button" hidden/);
+  assert.match(html, /<button class="set-row" id="set-limits">/);
+  assert.match(app, /quotaPill\.onclick = \(\) => \{ haptic\('light'\); openLimits\(\); \};/);
+  assert.match(app, /setLimits\.onclick = \(\) => \{ haptic\('light'\); openLimits\(\); \};/);
+  assert.match(app, /'#find-sheet', '#limits-sheet'\];/);
+  assert.match(app, /if \(id === '#limits-sheet'\) renderLimits\(\);/);
+  /* смена языка перерисовывает экран, а не оставляет старые подписи */
+  assert.match(app, /renderQuota\(\);\s*\n\s*renderLimits\(\);/);
+  assert.match(app, /if \(limitsSheet && !limitsSheet\.hidden\) renderLimits\(\);/);
+});
+
+test('the subscription block is an offer, never a requirement', () => {
+  assert.match(html, /<div id="limits-subscribe" hidden>/);
+  assert.match(app, /subscriptionAvailable: src\.subscription_available === true/);
+  assert.match(app, /if \(sub\) sub\.hidden = !v\.subscriptionAvailable;/);
+  assert.match(app, /cta\.hidden = !\(wantsCta && v\.channelUrl\);/);
+  /* раздел лимитов не закрывает приложение: никаких экранов отказа внутри */
+  const section = app.match(LIMITS_SECTION);
+  assert.ok(section, 'limits section exists');
+  assert.doesNotMatch(section[0], /showGate\(|showFatal\(|gateForError\(/);
+});
+
+test('a missing invite link falls back to a clear message, not a dead button', () => {
+  assert.match(html, /id="limits-no-link" hidden data-i18n="limits\.noLink"/);
+  assert.match(html, /id="limits-no-channel" hidden data-i18n="limits\.noChannel"/);
+  assert.match(app, /if \(linkBox\) linkBox\.hidden = !v\.link;/);
+  assert.match(app, /if \(noLink\) noLink\.hidden = !!v\.link;/);
+  assert.match(app, /v\.referralAvailable \? 'limits\.noLink' : 'limits\.referralOff'/);
+  assert.match(app, /referralAvailable: src\.referral_available !== false/);
+  /* в экран попадает только http(s)-ссылка */
+  assert.match(app, /link: httpUrl\(src\.referral_link\)/);
+  assert.ok(app.includes('/^https?:\\/\\//i.test(value.trim())'),
+    'only http(s) links reach the screen');
+});
+
+test('the personal link can be copied and shared inside Telegram', () => {
+  assert.match(app, /function copyReferralLink\(\)/);
+  assert.match(app, /copyText\(v\.link, true\)/);
+  assert.match(app, /warn\(t\('limits\.linkCopied'\), 'ok'\)/);
+  assert.match(app, /function shareReferralLink\(\)/);
+  assert.match(app, /openExternal\('https:\/\/t\.me\/share\/url\?url=' \+ encodeURIComponent\(v\.link\)/);
+  assert.match(app, /encodeURIComponent\(t\('limits\.shareText'\)\)/);
+  assert.match(app, /limitsCopy\.onclick = copyReferralLink;/);
+  assert.match(app, /limitsShare\.onclick = shareReferralLink;/);
+});
+
+test('the interface language travels with every API request', () => {
+  const config = fs.readFileSync(path.join(root, 'js/config.js'), 'utf8');
+  const apiSource = fs.readFileSync(path.join(root, 'js/api.js'), 'utf8');
+  assert.match(config, /const uiLang = \(\) => \{/);
+  assert.match(apiSource, /payload\.lang = lang;/);
+  assert.match(apiSource, /'&lang=' \+ encodeURIComponent\(lang\)/);
+  assert.match(app, /messages: cur\.messages, stream: !NO_STREAM, lang: uiLang\(\)/);
+});
+
+test('api() sends lang in the query of GET/DELETE and in the body of POST', async () => {
+  const seen = [];
+  const { api } = loadApi(async (url, opts) => {
+    seen.push({ url, body: opts.body });
+    return { ok: true, status: 200, json: async () => ({}) };
+  });
+  await api('GET', '/api/quota');
+  await api('POST', '/api/chats', { title: 't' });
+  await api('DELETE', '/api/chats');
+  assert.match(seen[0].url, /[?&]lang=en(&|$)/);
+  assert.match(seen[0].url, /[?&]initData=/);
+  assert.equal(JSON.parse(seen[1].body).lang, 'en');
+  assert.ok('initData' in JSON.parse(seen[1].body));
+  assert.match(seen[2].url, /[?&]lang=en(&|$)/);
+});
+
 test('the bot API contract is untouched', () => {
   for (const ep of ['/api/boot', '/api/models', '/api/chats', '/api/chat',
                     '/api/quota', '/api/stats', '/api/debug']) {
@@ -300,7 +398,7 @@ test('no Cloudflare challenge script in index.html', () => {
 
 test('sheets announce themselves as dialogs and close on Escape', () => {
   for (const id of ['chats-sheet', 'model-sheet', 'settings-sheet',
-                    'data-sheet', 'files-sheet', 'find-sheet']) {
+                    'data-sheet', 'files-sheet', 'find-sheet', 'limits-sheet']) {
     assert.match(html, new RegExp(`id="${id}"[^>]*role="dialog" aria-modal="true" aria-label="`),
       id + ' is a dialog');
   }

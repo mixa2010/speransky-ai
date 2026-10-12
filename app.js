@@ -7,7 +7,7 @@
    Render несёт Telegram initData, подпись проверяется сервером.
    ============================================================ */
 'use strict';
-window.__APP_V = '20261012c';
+window.__APP_V = '20261012d';
 const FALL_REASON = {
   rate: 'model.fallback.rate',
   cooldown: 'model.fallback.cooldown',
@@ -35,8 +35,8 @@ const state = {
   haptics: true,
   language: getLanguage(), // persistent UI locale; English on first launch
   pins: [],               // закреплённые чаты
-  quota: null,            // {left_day, unlimited} с сервера
-  policy: null,           // {free, donate_url, donate_note} из /api/boot и /api/quota
+  quota: null,            // {left_day, unlimited, daily_limit, referral_*} с сервера
+  policy: null,           // free/donate_* + квота и рефералы из /api/boot и /api/quota
   chatFilter: '',         // фильтр списка чатов в drawer
   modelQuery: '',         // поиск по списку моделей
   stickBottom: true,      // лента приклеена к низу (пользователь не читает историю)
@@ -45,7 +45,7 @@ const state = {
 
 /* Шторки, которые закрываются одинаково (клик по фону, Esc, свайп). */
 const SHEETS = ['#chats-sheet', '#model-sheet', '#settings-sheet',
-                '#data-sheet', '#files-sheet', '#find-sheet'];
+                '#data-sheet', '#files-sheet', '#find-sheet', '#limits-sheet'];
 
 /* ================= UI helpers ================= */
 /* kind: 'ok' — зелёная точка подтверждения (копирование, переименование). */
@@ -671,6 +671,7 @@ function openSheet(id) {
   if (id === '#chats-sheet') renderChatsList();
   if (id === '#model-sheet') { renderModelTabs(); renderModelsList(); }
   if (id === '#settings-sheet') renderSettings();
+  if (id === '#limits-sheet') renderLimits();
   const el = $(id);
   if (!el) return;
   if (el.__resetDrag) el.__resetDrag();
@@ -921,7 +922,7 @@ async function chatRequest(cur, bubble) {
         signal: requestController.signal,
         body: JSON.stringify({
           initData: INIT_DATA, provider: cur.provider, model: cur.model,
-          messages: cur.messages, stream: !NO_STREAM,
+          messages: cur.messages, stream: !NO_STREAM, lang: uiLang(),
         }),
       });
       markActivity(); // headers arrived; give the response body a fresh idle window
@@ -1322,6 +1323,7 @@ function refreshLocalizedUI() {
   renderModelsList();
   renderSupport();
   renderQuota();
+  renderLimits();
   buildQuickActions();
   if (!$('#chat-menu').hidden && state.current) {
     $('#cm-title').textContent = state.current.title || t('chat.title');
@@ -1534,12 +1536,20 @@ function renderFind(q) {
 }
 
 /* ================= квота запросов ================= */
-/* free / donate_url / donate_note — из boot.policy или /api/quota */
+/* boot.policy и /api/quota отдают не только free/donate_*, но и квоту с
+   рефералами: остаток, разложение лимита, число приглашённых и ссылку.
+   Складываем их в state.policy, чтобы цифры пережили провальный /api/quota. */
+const POLICY_KEYS = ['free', 'donate_url', 'donate_note', 'unlimited', 'left_day',
+  'daily_limit', 'base_daily_limit', 'base_total_daily_limit',
+  'subscribed_daily_limit', 'subscribed_total_daily_limit', 'subscribed',
+  'subscription_available', 'channel_url', 'referral_count', 'referral_bonus_daily',
+  'referral_bonus_per_friend', 'referral_link', 'referral_available', 'referral_note'];
+
 function mergePolicy(src) {
   if (!src || typeof src !== 'object') return;
   const p = Object.assign({}, state.policy || {});
   let any = false;
-  for (const k of ['free', 'donate_url', 'donate_note']) {
+  for (const k of POLICY_KEYS) {
     if (src[k] !== undefined && src[k] !== null) { p[k] = src[k]; any = true; }
   }
   if (any) state.policy = p;
@@ -1562,6 +1572,7 @@ function renderSupport() {
 }
 
 async function loadQuota() {
+  let failure = null;
   try {
     state.quota = await api('GET', '/api/quota');
     mergePolicy(state.quota);
@@ -1570,9 +1581,11 @@ async function loadQuota() {
        Сетевой сбой (code 0) — оставляем последние известные цифры,
        чтобы пилюля не мигала при каждом провальном фоновом запросе. */
     if (e.code !== 0) state.quota = null;
+    failure = e;
   }
   renderQuota();
   renderSupport();
+  return failure;
 }
 
 /* статистика проекта: сколько всего пользователей и кто заходил сегодня.
@@ -1611,6 +1624,16 @@ function renderQuota() {
       }
     }
   }
+  /* строка настроек показывает остаток и ведёт на экран лимитов */
+  const setVal = $('#set-limits-val');
+  if (setVal) {
+    const v = limitsView();
+    setVal.textContent = v.unlimited ? t('quota.unlimited')
+      : v.left == null ? '—'
+        : t('quota.todayLeft', { count: fmtNum(v.left) });
+  }
+  const limitsSheet = $('#limits-sheet');
+  if (limitsSheet && !limitsSheet.hidden) renderLimits();
   /* предупреждение о лимите показываем там, где оно нужно — над полем ввода */
   const hint = $('#quota-hint');
   const hintTx = $('#quota-hint-tx');
@@ -1626,6 +1649,216 @@ function renderQuota() {
   } else {
     hint.hidden = true;
   }
+}
+
+/* ================= лимиты и приглашения ================= */
+/* Отдельный экран: остаток запросов на сегодня, разложение дневного лимита
+   (10 базовых или 50 с подтверждённой подпиской + 5 за каждого друга),
+   число приглашённых, личная ссылка и «Поделиться» в Telegram.
+   Подписка не обязательна для доступа: блок подписки показываем только
+   при subscription_available = true, а без ссылки — понятное резервное
+   сообщение вместо пустого места. */
+function num(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+function fmtNum(value) {
+  return new Intl.NumberFormat(getLocale()).format(Number(value));
+}
+function httpUrl(value) {
+  return typeof value === 'string' && /^https?:\/\//i.test(value.trim())
+    ? value.trim() : '';
+}
+
+/* Подпись, которую экран выбирает сам: меняем и текст, и ключ data-i18n,
+   чтобы смена языка не вернула прежнее значение из applyI18n(). */
+function setLabel(el, key) {
+  if (!el) return;
+  el.dataset.i18n = key;
+  el.textContent = t(key);
+}
+
+/* Одна нормализованная картина квоты и рефералов: /api/quota перекрывает
+   boot.policy, а недостающие числа восстанавливаем по смыслу полей. */
+function limitsView() {
+  const src = Object.assign({}, state.policy || {}, state.quota || {});
+  const unlimited = src.unlimited === true;
+  const subscribed = src.subscribed === true;
+  const base = Math.max(0, num(src.base_daily_limit, 10));
+  const subscribedDaily = Math.max(0, num(src.subscribed_daily_limit,
+                                          Math.max(50, base)));
+  const tierBase = subscribed ? subscribedDaily : base;
+  const tierTotal = num(subscribed ? src.subscribed_total_daily_limit
+                                   : src.base_total_daily_limit, null);
+  const friends = Math.max(0, num(src.referral_count, 0));
+  const perFriend = Math.max(0, num(src.referral_bonus_per_friend, 5));
+  const bonus = Math.max(0, num(src.referral_bonus_daily,
+    tierTotal == null ? friends * perFriend : tierTotal - tierBase));
+  const total = Math.max(0, num(src.daily_limit,
+    tierTotal == null ? tierBase + bonus : tierTotal));
+  return {
+    known: !!(state.quota || state.policy),
+    unlimited, subscribed, base, subscribedDaily, tierBase, bonus, total,
+    left: unlimited ? null : num(src.left_day, null),
+    friends, perFriend,
+    link: httpUrl(src.referral_link),
+    referralAvailable: src.referral_available !== false,
+    subscriptionAvailable: src.subscription_available === true,
+    channelUrl: httpUrl(src.channel_url),
+    note: typeof src.referral_note === 'string' ? src.referral_note.trim() : '',
+  };
+}
+
+function renderLimits() {
+  const sheet = $('#limits-sheet');
+  if (!sheet) return;
+  const v = limitsView();
+  const requests = (n) => t('limits.requests', {
+    count: fmtNum(n), requests: tPlural('quota.request', n) });
+  const friendsValue = (n) => t('limits.friendsValue', {
+    count: fmtNum(n), friends: tPlural('limits.friend', n) });
+  const noLinkKey = v.referralAvailable ? 'limits.noLink' : 'limits.referralOff';
+
+  /* ---- остаток на сегодня ---- */
+  const hero = $('.limits-hero');
+  const leftEl = $('#limits-left');
+  const leftNote = $('#limits-left-note');
+  setLabel($('#limits-left-label'),
+           v.unlimited ? 'limits.unlimitedToday' : 'limits.leftToday');
+  if (v.unlimited) {
+    if (leftEl) leftEl.textContent = '∞';
+    if (leftNote) { leftNote.textContent = ''; leftNote.hidden = true; }
+    if (hero) hero.className = 'limits-hero inf';
+  } else if (v.left == null) {
+    if (leftEl) leftEl.textContent = '—';
+    if (leftNote) {
+      leftNote.hidden = !v.known;
+      leftNote.textContent = v.known
+        ? t('limits.ofTotal', { total: fmtNum(v.total) }) : '';
+    }
+    if (hero) hero.className = 'limits-hero';
+  } else {
+    if (leftEl) leftEl.textContent = fmtNum(v.left);
+    if (leftNote) {
+      leftNote.hidden = false;
+      leftNote.textContent = v.left > 0
+        ? t('limits.ofTotal', { total: fmtNum(v.total) })
+        : t('quota.exhausted');
+    }
+    if (hero) {
+      hero.className = 'limits-hero' +
+        (v.left <= 0 ? ' spent' : (v.left <= 5 ? ' low' : ''));
+    }
+  }
+  const bar = $('#limits-bar');
+  const fill = $('#limits-bar-fill');
+  const showBar = !v.unlimited && v.left != null && v.total > 0;
+  if (bar) {
+    bar.hidden = !showBar;
+    bar.classList.toggle('low', showBar && v.left <= 5);
+  }
+  if (fill) {
+    fill.style.width = showBar
+      ? Math.round(Math.max(0, Math.min(1, v.left / v.total)) * 100) + '%' : '0%';
+  }
+
+  /* ---- разложение лимита: база + друзья = всего ---- */
+  setLabel($('#limits-base-label'),
+           v.subscribed ? 'limits.baseRowSubscribed' : 'limits.baseRow');
+  const baseVal = $('#limits-base-val');
+  if (baseVal) baseVal.textContent = requests(v.tierBase);
+  const friendsVal = $('#limits-friends-val');
+  if (friendsVal) {
+    friendsVal.textContent = v.bonus > 0
+      ? t('limits.friendsBonus', { bonus: fmtNum(v.bonus),
+                                   count: fmtNum(v.friends),
+                                   each: fmtNum(v.perFriend) })
+      : t('limits.friendsNone', { each: fmtNum(v.perFriend) });
+  }
+  const totalVal = $('#limits-total-val');
+  if (totalVal) {
+    totalVal.textContent = v.unlimited ? t('quota.unlimited') : requests(v.total);
+  }
+  const breakdownNote = $('#limits-breakdown-note');
+  if (breakdownNote) {
+    const grow = v.friends <= 0 && v.perFriend > 0;
+    breakdownNote.hidden = !grow;
+    breakdownNote.textContent = grow
+      ? t('limits.invitedNone', { each: fmtNum(v.perFriend) }) : '';
+  }
+
+  /* ---- приглашения: сколько друзей, ссылка, копирование и «Поделиться» ---- */
+  const invitedVal = $('#limits-invited-val');
+  if (invitedVal) invitedVal.textContent = friendsValue(v.friends);
+  const linkBox = $('#limits-link-box');
+  const linkTx = $('#limits-link-tx');
+  if (linkBox) linkBox.hidden = !v.link;
+  if (linkTx) linkTx.textContent = v.link;
+  setLabel($('#limits-no-link'), noLinkKey);
+  const noLink = $('#limits-no-link');
+  if (noLink) noLink.hidden = !!v.link;
+  const serverNote = $('#limits-referral-note');
+  if (serverNote) {
+    serverNote.hidden = !v.note;
+    serverNote.textContent = v.note;
+  }
+
+  /* ---- подписка: только предложение, никогда не требование ---- */
+  const sub = $('#limits-subscribe');
+  if (sub) sub.hidden = !v.subscriptionAvailable;
+  if (v.subscriptionAvailable) {
+    setLabel($('#limits-sub-title'),
+             v.subscribed ? 'limits.subscribedOn' : 'limits.subscribeTitle');
+    const subText = $('#limits-sub-text');
+    if (subText) {
+      subText.textContent = v.subscribed
+        ? t('limits.subscribedText', { count: fmtNum(v.subscribedDaily) })
+        : t('limits.subscribeText', { count: fmtNum(v.subscribedDaily),
+                                      base: fmtNum(v.base) });
+    }
+    const wantsCta = !v.subscribed;
+    const cta = $('#limits-sub-cta');
+    if (cta) cta.hidden = !(wantsCta && v.channelUrl);
+    const noChannel = $('#limits-no-channel');
+    if (noChannel) noChannel.hidden = !(wantsCta && !v.channelUrl);
+  }
+}
+
+function copyReferralLink() {
+  const v = limitsView();
+  if (!v.link) {
+    warn(t(v.referralAvailable ? 'limits.noLink' : 'limits.referralOff'));
+    return;
+  }
+  haptic('light');
+  copyText(v.link, true);
+  warn(t('limits.linkCopied'), 'ok');
+}
+
+/* «Поделиться» ведёт в официальный диалог Telegram t.me/share/url: внутри
+   Mini App это openTelegramLink — выбор чата без выхода из Telegram. */
+function shareReferralLink() {
+  const v = limitsView();
+  if (!v.link) {
+    warn(t(v.referralAvailable ? 'limits.noLink' : 'limits.referralOff'));
+    return;
+  }
+  haptic('light');
+  openExternal('https://t.me/share/url?url=' + encodeURIComponent(v.link) +
+               '&text=' + encodeURIComponent(t('limits.shareText')));
+}
+
+function openLimits() {
+  closeSheets();
+  openSheet('#limits-sheet');
+  loadQuota();          // цифры свежее того, что пришло в boot.policy
+}
+
+async function refreshLimits() {
+  haptic('light');
+  const failure = await loadQuota();
+  if (failure) warn(t('limits.updateFailed', { error: errorText(failure, failure.message) }));
+  else warn(t('limits.updated'), 'ok');
 }
 
 /* ================= быстрые действия на пустом экране ================= */
@@ -1911,6 +2144,26 @@ async function boot() {
     savePrefs(); renderSettings(); hapticSel();
   };
   $('#set-data').onclick = () => { closeSheets(); openSheet('#data-sheet'); };
+  /* ---- лимиты и приглашения ---- */
+  const quotaPill = $('#quota-pill');
+  if (quotaPill) quotaPill.onclick = () => { haptic('light'); openLimits(); };
+  const setLimits = $('#set-limits');
+  if (setLimits) setLimits.onclick = () => { haptic('light'); openLimits(); };
+  const limitsRefresh = $('#limits-refresh');
+  if (limitsRefresh) limitsRefresh.onclick = () => { refreshLimits(); };
+  const limitsCopy = $('#limits-copy');
+  if (limitsCopy) limitsCopy.onclick = copyReferralLink;
+  const limitsShare = $('#limits-share');
+  if (limitsShare) limitsShare.onclick = shareReferralLink;
+  const limitsSub = $('#limits-sub-cta');
+  if (limitsSub) {
+    limitsSub.onclick = () => {
+      const channelUrl = limitsView().channelUrl;
+      if (!channelUrl) { warn(t('limits.noChannel')); return; }
+      haptic('light');
+      openExternal(channelUrl);
+    };
+  }
   $('#data-ok').onclick = () => { haptic('light'); closeSheets(); };
   const wipe = $('#btn-wipe');
   const wipeLabel = wipe.querySelector('span');
