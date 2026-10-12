@@ -36,9 +36,10 @@ const json = (body, status = 200) => ({
   ok: status < 400, status, bodyUsed: false,
   headers: { get: () => 'application/json' }, json: async () => body,
 });
-const ndjson = (lines) => {
+const ndjson = (lines, trailingNewline = true) => {
   const enc = new TextEncoder();
-  const chunks = lines.map((l) => enc.encode(JSON.stringify(l) + '\n'));
+  const chunks = lines.map((l, i) => enc.encode(JSON.stringify(l) +
+    (i === lines.length - 1 && !trailingNewline ? '' : '\n')));
   let i = 0;
   return {
     ok: true, status: 200, bodyUsed: false,
@@ -73,9 +74,11 @@ function makeWindow(handler, opts) {
 }
 
 const MODELS = [
-  { provider: 'gemini', model: 'gemini-2.5-flash', state: 'ok', available: true, vision: true },
+  { provider: 'gemini', model: 'gemini-2.5-flash', state: 'ok', available: true, vision: true, recommended: true },
   { provider: 'groq', model: 'llama-3.3-70b', state: 'ok', available: true },
   { provider: 'mistral', model: 'codestral-latest', state: 'cooldown', available: true },
+  { provider: 'old', model: 'retired-model', state: 'dead', available: true },
+  { provider: 'test', model: 'disabled-model', state: 'ok', available: false },
 ];
 const CHATS = [
   { id: 'c1', title: 'Разбор контрольной', model: 'gemini/gemini-2.5-flash',
@@ -83,6 +86,43 @@ const CHATS = [
   { id: 'c2', title: 'План подготовки', model: 'groq/llama-3.3-70b',
     updated_at: new Date(Date.now() - 86400000).toISOString() },
 ];
+
+/* ================= markdown sanitizer ================= */
+function markdownSafety() {
+  const dom = new JSDOM('<!doctype html><html><body><div id="target"></div></body></html>', {
+    runScripts: 'outside-only', url: 'https://app.example/',
+  });
+  const w = dom.window;
+  w.t = (key) => key;
+  w.marked = {
+    setOptions() {},
+    parse: () => '<p>safe <strong>bold</strong></p>' +
+      '<img src="https://images.example/p.png" onerror="window.__xss=1" style="display:none">' +
+      '<a href="javascript:window.__xss=2" onclick="window.__xss=3">unsafe link</a>' +
+      '<a href="https://safe.example/" target="_blank">safe link</a>' +
+      '<script>window.__xss=4</script><svg onload="window.__xss=5"><text>bad</text></svg>' +
+      '<pre><code>const answer = 42;</code></pre>',
+  };
+  w.eval(fs.readFileSync(path.join(ROOT, 'js/render.js'), 'utf8') +
+    '\nglobalThis.__renderRich = renderRich;');
+  const target = w.document.querySelector('#target');
+  w.__renderRich(target, 'untrusted model output');
+  check('markdown keeps normal formatting', !!target.querySelector('p strong'), target.innerHTML);
+  check('markdown removes active elements and event/style attributes',
+    !target.querySelector('script, svg') &&
+      [...target.querySelectorAll('*')].every((el) =>
+        ![...el.attributes].some((attr) => /^on/i.test(attr.name) || attr.name === 'style')),
+    target.innerHTML);
+  const unsafe = [...target.querySelectorAll('a')].find((a) => a.textContent === 'unsafe link');
+  const safe = [...target.querySelectorAll('a')].find((a) => a.textContent === 'safe link');
+  check('markdown rejects javascript URLs and protects new tabs',
+    !!unsafe && !unsafe.hasAttribute('href') && !!safe &&
+      safe.getAttribute('rel') === 'noopener noreferrer', target.innerHTML);
+  check('markdown retains valid remote images without event handlers',
+    !!target.querySelector('img[src="https://images.example/p.png"]') &&
+      !target.querySelector('img[onerror]'), target.innerHTML);
+  dom.window.close();
+}
 
 /* ================= 1. счастливый путь ================= */
 async function happyPath() {
@@ -113,7 +153,7 @@ async function happyPath() {
         { d: 'Привет! ' }, { d: '**ответ** ' }, { d: 'на вопрос.' },
         { provider: 'gemini', model: 'gemini-2.5-flash', reply: 'Привет! **ответ** на вопрос.',
           filtered: false, fallbacks: [] },
-      ]));
+      ], false)); // also cover a final NDJSON record without a trailing LF
     }
     return Promise.resolve(json({}));
   };
@@ -166,24 +206,62 @@ async function happyPath() {
 
   $('#btn-model').click();
   await sleep(30);
-  check('шторка моделей открыта', $('#model-sheet').hidden === false, 'скрыта');
-  check('текстовая вкладка без кодинг-моделей',
-    d.querySelectorAll('#models-list .model-row').length === 2,
-    String(d.querySelectorAll('#models-list .model-row').length));
+  check('model chooser opens on Recommended with guidance',
+    [...d.querySelectorAll('.cat-tab')].some((b) => b.classList.contains('active') && /For you/.test(b.textContent)) &&
+      !!$('#models-list .model-recommend-hint'),
+    [...d.querySelectorAll('.cat-tab')].map((b) => b.textContent).join(' / '));
+  const recommendedRows = [...d.querySelectorAll('#models-list .model-row')];
+  check('Recommended lists selectable models first and excludes unavailable models',
+    recommendedRows.length === 3 && /gemini-2\.5-flash/.test(recommendedRows[0].textContent) &&
+      !recommendedRows.some((row) => /retired-model|disabled-model/.test(row.textContent)),
+    recommendedRows.map((row) => row.textContent).join(' | '));
+  check('photo support is clearly labelled on vision models',
+    !!recommendedRows[0].querySelector('.model-capability') &&
+      /Understands photos/.test(recommendedRows[0].textContent),
+    recommendedRows[0] && recommendedRows[0].textContent);
+  const allTab = [...d.querySelectorAll('.cat-tab')].find((b) => /^All/.test(b.textContent.trim()));
+  allTab.click();
+  await sleep(30);
+  const allRows = [...d.querySelectorAll('#models-list .model-row')];
+  const deadRow = allRows.find((row) => /retired-model/.test(row.textContent));
+  const unavailableRow = allRows.find((row) => /disabled-model/.test(row.textContent));
+  check('All shows the complete catalogue and makes dead/unavailable rows disabled',
+    allRows.length === MODELS.length && !!deadRow && deadRow.disabled &&
+      !!unavailableRow && unavailableRow.disabled,
+    allRows.map((row) => row.textContent + (row.disabled ? ' [disabled]' : '')).join(' | '));
   const codeTab = [...d.querySelectorAll('.cat-tab')].find((b) => /Code/.test(b.textContent));
   codeTab.click();
   await sleep(30);
-  check('вкладка «Код» показывает codestral', /codestral/.test($('#models-list').textContent),
+  check('Code tab still shows code models', /codestral/.test($('#models-list').textContent),
     $('#models-list').textContent.slice(0, 50));
+  const imageTab = [...d.querySelectorAll('.cat-tab')].find((b) => /Images/.test(b.textContent));
+  const videoTab = [...d.querySelectorAll('.cat-tab')].find((b) => /Video/.test(b.textContent));
+  check('image and video generation tabs are preserved', !!imageTab && !!videoTab,
+    [...d.querySelectorAll('.cat-tab')].map((b) => b.textContent).join(' / '));
+  imageTab.click();
+  await sleep(20);
+  const imagePlaceholder = /Image generation/.test($('#models-list').textContent) &&
+    /Soon/.test($('#models-list').textContent);
+  videoTab.click();
+  await sleep(20);
+  check('image/video tabs retain their coming-soon panels', imagePlaceholder &&
+    /Video generation/.test($('#models-list').textContent) && /Soon/.test($('#models-list').textContent),
+    $('#models-list').textContent);
   $('#model-search').value = 'llama';
   $('#model-search').dispatchEvent(new w.Event('input'));
   await sleep(20);
-  check('поиск ищет по всем категориям', /llama-3\.3-70b/.test($('#models-list').textContent),
+  check('search still finds models across every category', /llama-3\.3-70b/.test($('#models-list').textContent),
     $('#models-list').textContent.slice(0, 60));
+  $('#model-search').value = 'disabled-model';
+  $('#model-search').dispatchEvent(new w.Event('input'));
+  await sleep(20);
+  check('global search does not make disabled models selectable',
+    d.querySelector('#models-list .model-row')?.disabled === true,
+    $('#models-list').textContent);
   $('#model-search-clear').click();
   await sleep(20);
-  check('сброс поиска возвращает список', d.querySelector('#models-list .model-row') !== null,
-    'пусто');
+  check('resetting global search restores current tab content',
+    /Video generation/.test($('#models-list').textContent), $('#models-list').textContent);
   $('#model-sheet .sheet-close').click();
   await sleep(20);
 
@@ -246,6 +324,255 @@ async function happyPath() {
   await sleep(20);
   check('поиск в чате находит сообщения', $('#find-list').children.length > 0,
     $('#find-list').textContent.slice(0, 50));
+}
+
+async function noSelectableModelGuard() {
+  let createPosts = 0;
+  const unavailable = [
+    { provider: 'old', model: 'retired-model', state: 'dead', available: true },
+    { provider: 'offline', model: 'down-model', state: 'ok', available: false },
+  ];
+  const w = makeWindow((u, o) => {
+    const method = o.method || 'GET';
+    if (u.includes('/api/boot')) return Promise.resolve(json({ models: unavailable, chats: [] }));
+    if (u.includes('/api/quota')) return Promise.resolve(json({ left_day: 9, unlimited: false }));
+    if (/\/api\/chats(\/|$|\?)/.test(u) && method === 'POST') {
+      createPosts += 1;
+      return Promise.resolve(json({ id: 'invalid', model: 'old/retired-model' }));
+    }
+    return Promise.resolve(json({}));
+  });
+  await sleep(70);
+  const d = w.document;
+  d.querySelector('#btn-new').click();
+  await sleep(20);
+  check('no selectable model opens the chooser instead of creating an invalid chat',
+    createPosts === 0 && d.querySelector('#model-sheet').hidden === false &&
+      /No models can be selected/.test(d.querySelector('#models-list').textContent),
+    `posts=${createPosts}; ${d.querySelector('#models-list').textContent}`);
+  [...d.querySelectorAll('.cat-tab')].find((b) => /^All/.test(b.textContent.trim())).click();
+  const rows = [...d.querySelectorAll('#models-list .model-row')];
+  check('all disabled catalogue entries remain visible but not actionable',
+    rows.length === unavailable.length && rows.every((row) => row.disabled),
+    rows.map((row) => row.textContent + (row.disabled ? ' [disabled]' : '')).join(' | '));
+  w.close();
+}
+
+/* ================= запросы/состояние во время отправки ================= */
+async function rejectedOptimisticCreate() {
+  let chatRequests = 0;
+  const w = makeWindow((u, o) => {
+    const method = o.method || 'GET';
+    if (u.includes('/api/boot')) return Promise.resolve(json({ models: MODELS, chats: [] }));
+    if (u.includes('/api/quota')) return Promise.resolve(json({ left_day: 9, unlimited: false }));
+    if (/\/api\/chats(\/|$|\?)/.test(u) && method === 'POST') {
+      return new Promise((resolve) => setTimeout(() => resolve(json({
+        code: 'chat_limit', error: 'chat limit reached',
+      }, 409)), 35));
+    }
+    if (/\/api\/chat(?:\?|$)/.test(u)) chatRequests += 1;
+    return Promise.resolve(json({}));
+  });
+  await sleep(70);
+  const d = w.document;
+  d.querySelector('#btn-new').click();
+  d.querySelector('#input').value = "don't lose this";
+  d.querySelector('#input').dispatchEvent(new w.Event('input'));
+  d.querySelector('#btn-send').click();
+  await sleep(170);
+  check('a rejected optimistic chat create does not crash or send against a missing chat',
+    chatRequests === 0 && d.querySelectorAll('#messages .msg').length === 0 &&
+      d.querySelector('#fatal').hidden === true,
+    `requests=${chatRequests}; messages=${d.querySelectorAll('#messages .msg').length}`);
+  w.close();
+}
+
+async function singleFlight() {
+  let createPosts = 0, chatRequests = 0, writes = 0;
+  const w = makeWindow((u, o) => {
+    const method = o.method || 'GET';
+    if (u.includes('/api/boot')) return Promise.resolve(json({ models: MODELS, chats: [] }));
+    if (u.includes('/api/quota')) return Promise.resolve(json({ left_day: 9, unlimited: false }));
+    if (/\/api\/chats(\/|$|\?)/.test(u) && method === 'POST') {
+      createPosts += 1;
+      return new Promise((resolve) => setTimeout(() => resolve(json({
+        id: 'single', title: 'New chat', model: 'gemini/gemini-2.5-flash',
+        updated_at: new Date().toISOString(),
+      })), 60));
+    }
+    if (/\/api\/chat(?:\?|$)/.test(u)) {
+      chatRequests += 1;
+      return Promise.resolve(json({ reply: 'one answer', provider: 'gemini',
+        model: 'gemini-2.5-flash', filtered: false, fallbacks: [] }));
+    }
+    if (method === 'PUT') { writes += 1; return Promise.resolve(json({ ok: true })); }
+    return Promise.resolve(json({}));
+  });
+  await sleep(70);
+  const d = w.document;
+  d.querySelector('#input').value = 'one question';
+  d.querySelector('#input').dispatchEvent(new w.Event('input'));
+  d.querySelector('#btn-send').click();
+  d.querySelector('#btn-send').click(); // tap again while chat creation is pending
+  await sleep(260);
+  check('rapid repeated sends create only one chat and one model request',
+    createPosts === 1 && chatRequests === 1 && writes === 1,
+    `chats=${createPosts}, requests=${chatRequests}, writes=${writes}`);
+  check('single-flight request renders one user/assistant pair',
+    d.querySelectorAll('#messages .msg').length === 2,
+    String(d.querySelectorAll('#messages .msg').length));
+  w.close();
+}
+
+async function stoppedStreamIsSaved() {
+  const writes = [];
+  let otherChatGets = 0;
+  const w = makeWindow((u, o) => {
+    const method = o.method || 'GET';
+    if (u.includes('/api/boot')) return Promise.resolve(json({ models: MODELS, chats: CHATS }));
+    if (u.includes('/api/quota')) return Promise.resolve(json({ left_day: 9, unlimited: false }));
+    if (u.includes('/api/chats/c1') && method === 'GET') {
+      return Promise.resolve(json(Object.assign({}, CHATS[0], { messages: [] })));
+    }
+    if (u.includes('/api/chats/c2') && method === 'GET') {
+      otherChatGets += 1;
+      return Promise.resolve(json(Object.assign({}, CHATS[1], { messages: [] })));
+    }
+    if (/\/api\/chat(?:\?|$)/.test(u)) {
+      const signal = o.signal;
+      let sent = false;
+      const abortError = () => Object.assign(new Error('aborted'), { name: 'AbortError' });
+      return Promise.resolve({
+        ok: true, status: 200, bodyUsed: false,
+        headers: { get: () => 'application/x-ndjson' },
+        body: { getReader: () => ({ read: () => {
+          if (!sent) {
+            sent = true;
+            return Promise.resolve({ done: false,
+              value: new TextEncoder().encode(JSON.stringify({ d: 'Частичный ответ' }) + '\n') });
+          }
+          return new Promise((resolve, reject) => {
+            if (signal.aborted) return reject(abortError());
+            signal.addEventListener('abort', () => reject(abortError()), { once: true });
+          });
+        } }) },
+      });
+    }
+    if (method === 'PUT') {
+      writes.push(JSON.parse(o.body));
+      return Promise.resolve(json({ ok: true }));
+    }
+    return Promise.resolve(json({}));
+  });
+  await sleep(80);
+  const d = w.document;
+  d.querySelector('#input').value = 'останови меня';
+  d.querySelector('#input').dispatchEvent(new w.Event('input'));
+  d.querySelector('#btn-send').click();
+  await sleep(30);
+  d.querySelector('#btn-chats').click();
+  const second = [...d.querySelectorAll('#chats-list .chat-row')]
+    .find((row) => row.textContent.includes('План подготовки'));
+  if (second) second.click();
+  check('switching chats is blocked while a reply is active',
+    otherChatGets === 0 && d.querySelector('#head-title').textContent === CHATS[0].title,
+    `other-chat requests=${otherChatGets}, title=${d.querySelector('#head-title').textContent}`);
+  d.querySelector('#btn-send').click();
+  await sleep(160);
+  const saved = writes.find((body) => Array.isArray(body.messages) &&
+    body.messages.some((m) => m.role === 'assistant' && m.content === 'Частичный ответ'));
+  check('a user-stopped partial response is persisted to chat history', !!saved,
+    JSON.stringify(writes));
+  check('saved partial response is marked as saved in the UI',
+    /stopped — saved the part/.test(d.querySelector('#messages').textContent),
+    d.querySelector('#messages').textContent.slice(-100));
+  w.close();
+}
+
+async function streamActivityResetsTimeout() {
+  let chatRequests = 0;
+  const w = makeWindow((u, o) => {
+    const method = o.method || 'GET';
+    if (u.includes('/api/boot')) return Promise.resolve(json({ models: MODELS, chats: CHATS }));
+    if (u.includes('/api/quota')) return Promise.resolve(json({ left_day: 9, unlimited: false }));
+    if (u.includes('/api/chats/c1') && method === 'GET') {
+      return Promise.resolve(json(Object.assign({}, CHATS[0], { messages: [] })));
+    }
+    if (/\/api\/chat(?:\?|$)/.test(u)) {
+      chatRequests += 1;
+      const enc = new TextEncoder();
+      const records = [
+        { d: 'part ' }, { d: 'of answer' },
+        { provider: 'gemini', model: 'gemini-2.5-flash', reply: 'part of answer',
+          filtered: false, fallbacks: [] },
+      ];
+      let i = 0;
+      return Promise.resolve({
+        ok: true, status: 200, bodyUsed: false,
+        headers: { get: () => 'application/x-ndjson' },
+        body: { getReader: () => ({ read: () => new Promise((resolve) => setTimeout(() => {
+          if (i < records.length) {
+            const record = records[i++];
+            resolve({ done: false, value: enc.encode(JSON.stringify(record) +
+              (i === records.length ? '' : '\n')) });
+          } else resolve({ done: true, value: undefined });
+        }, 10)) }) },
+      });
+    }
+    return Promise.resolve(json({ ok: true }));
+  });
+  await sleep(80);
+  const nativeSetTimeout = w.setTimeout.bind(w);
+  w.setTimeout = (fn, ms, ...args) => nativeSetTimeout(fn,
+    ms === 95000 ? 22 : ms, ...args);
+  const d = w.document;
+  d.querySelector('#input').value = 'ответь постепенно';
+  d.querySelector('#input').dispatchEvent(new w.Event('input'));
+  d.querySelector('#btn-send').click();
+  await sleep(160);
+  check('stream chunks reset the idle timeout instead of imposing a total deadline',
+    chatRequests === 1 && d.querySelector('#messages').textContent.includes('part of answer'),
+    `requests=${chatRequests}; ${d.querySelector('#messages').textContent.slice(-100)}`);
+  w.close();
+}
+
+async function streamSilenceTimesOut() {
+  let chatRequests = 0;
+  const w = makeWindow((u, o) => {
+    const method = o.method || 'GET';
+    if (u.includes('/api/boot')) return Promise.resolve(json({ models: MODELS, chats: CHATS }));
+    if (u.includes('/api/quota')) return Promise.resolve(json({ left_day: 9, unlimited: false }));
+    if (u.includes('/api/chats/c1') && method === 'GET') {
+      return Promise.resolve(json(Object.assign({}, CHATS[0], { messages: [] })));
+    }
+    if (/\/api\/chat(?:\?|$)/.test(u)) {
+      chatRequests += 1;
+      const signal = o.signal;
+      const abortError = () => Object.assign(new Error('aborted'), { name: 'AbortError' });
+      return Promise.resolve({
+        ok: true, status: 200, bodyUsed: false,
+        headers: { get: () => 'application/x-ndjson' },
+        body: { getReader: () => ({ read: () => new Promise((resolve, reject) => {
+          if (signal.aborted) return reject(abortError());
+          signal.addEventListener('abort', () => reject(abortError()), { once: true });
+        }) }) },
+      });
+    }
+    return Promise.resolve(json({ ok: true }));
+  });
+  await sleep(80);
+  const nativeSetTimeout = w.setTimeout.bind(w);
+  w.setTimeout = (fn, ms, ...args) => nativeSetTimeout(fn,
+    ms === 95000 ? 12 : ((ms === 900 || ms === 2200) ? 1 : ms), ...args);
+  const d = w.document;
+  d.querySelector('#input').value = 'ответь';
+  d.querySelector('#input').dispatchEvent(new w.Event('input'));
+  d.querySelector('#btn-send').click();
+  await sleep(180);
+  check('silent response bodies time out and retry only a bounded number of times',
+    chatRequests === 3 && /took too long to respond/i.test(d.querySelector('#messages').textContent),
+    `requests=${chatRequests}; ${d.querySelector('#messages').textContent.slice(-100)}`);
+  w.close();
 }
 
 /* ================= 1.5 пустая лента не крадёт пол-экрана ================= */
@@ -383,7 +710,14 @@ async function gates() {
 }
 
 (async () => {
+  markdownSafety();
   await happyPath();
+  await noSelectableModelGuard();
+  await rejectedOptimisticCreate();
+  await singleFlight();
+  await stoppedStreamIsSaved();
+  await streamActivityResetsTimeout();
+  await streamSilenceTimesOut();
   await emptyState();
   await restoredLanguage();
   await gates();

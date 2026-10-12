@@ -7,7 +7,7 @@
    Render несёт Telegram initData, подпись проверяется сервером.
    ============================================================ */
 'use strict';
-window.__APP_V = '20261012a';
+window.__APP_V = '20261012c';
 const FALL_REASON = {
   rate: 'model.fallback.rate',
   cooldown: 'model.fallback.cooldown',
@@ -24,7 +24,9 @@ const state = {
   chats: [],
   current: null,          // {id, title, provider, model, messages: []}
   busy: false,
-  modelTab: 'text',       // активная вкладка категорий в шторке моделей
+  sending: false,         // синхронный lock: не создаём дубли при ожидании чата
+  stopRequested: false,   // отличаем ручную отмену от таймаута запроса
+  modelTab: 'recommended', // активная вкладка категорий в шторке моделей
   chatReady: null,        // промис фонового создания чата на сервере
   tempMap: {},            // local-id → серверный id (после сохранения)
   tempCancel: new Set(),  // local-id удалённых до сохранения чатов
@@ -55,6 +57,13 @@ function warn(text, kind) {
   if (w.classList) w.classList.toggle('warn-ok', kind === 'ok');
   clearTimeout(warn._t);
   warn._t = setTimeout(() => { w.hidden = true; }, kind === 'ok' ? 3200 : 6000);
+}
+
+/* Do not detach the active response bubble or delete its chat mid-request. */
+function blockDuringSend() {
+  if (!state.sending && !state.busy) return false;
+  warn(t('message.finishFirst'));
+  return true;
 }
 
 /* Экран-заглушка вместо чата: ошибка, подписка или техработы.
@@ -357,7 +366,7 @@ function dedupeRegen() {
 /* «заново» = заменяем ТОЛЬКО ответ: вопрос остаётся на месте,
    ничего не удаляется и не отправляется повторно */
 function regenerateLast() {
-  if (state.busy || !state.current) return;
+  if (state.busy || state.sending || !state.current) return;
   const msgs = state.current.messages;
   while (msgs.length && msgs[msgs.length - 1].role === 'assistant') msgs.pop();
   if (!msgs.length || msgs[msgs.length - 1].role !== 'user') {
@@ -421,6 +430,7 @@ function parseModel(str) {
 }
 
 async function openChat(id) {
+  if (blockDuringSend()) return;
   if (String(id).startsWith('local-')) {
     // чат ещё создаётся на сервере — дожидаемся и берём настоящий id
     if (state.chatReady) {
@@ -442,7 +452,8 @@ async function openChat(id) {
 }
 
 async function createChat() {
-  const def = state.models.find(m => m.available) || state.models[0] || {};
+  const def = getDefaultModel();
+  if (!def.model) { openSheet('#model-sheet'); return; }
   const row = await api('POST', '/api/chats', {
     title: t('chat.newTitle'), model: `${def.provider || ''}/${def.model || ''}`,
   });
@@ -455,6 +466,7 @@ async function createChat() {
 }
 
 async function deleteChat(id) {
+  if (blockDuringSend()) return;
   if (String(id).startsWith('local-')) {
     const real = state.tempMap[id];
     if (real) id = real;                    // уже сохранился — удаляем как обычно
@@ -576,6 +588,7 @@ function renderChatsList() {
 }
 
 function createChatOptimistic(provider, model) {
+  if (blockDuringSend()) return;
   const tempId = 'local-' + Date.now().toString(36) + '-' +
                  Math.random().toString(36).slice(2, 7);
   const cur = { id: tempId, title: t('chat.newTitle'), isNew: true, provider, model, messages: [] };
@@ -784,10 +797,10 @@ function applyTgTheme() {
 }
 
 /* ================= стриминг ================= */
-async function readStream(res, bubble) {
+async function readStream(res, bubble, onActivity) {
   const reader = res.body.getReader();
   try {
-    return await _readStreamInner(res, reader, bubble);
+    return await _readStreamInner(res, reader, bubble, onActivity);
   } catch (e) {
     bubble.classList.remove('streaming');
     if (e && e.name === 'AbortError') { e.aborted = true; e.partial = bubble.__acc || ''; }
@@ -795,7 +808,7 @@ async function readStream(res, bubble) {
   }
 }
 
-async function _readStreamInner(res, reader, bubble) {
+async function _readStreamInner(res, reader, bubble, onActivity) {
   const dec = new TextDecoder();
   let buf = '', acc = '', last = 0, meta = null;
   bubble.classList.remove('pending');
@@ -807,32 +820,40 @@ async function _readStreamInner(res, reader, bubble) {
     renderRich(bubble, acc);
     scrollBottom();
   };
+  const consume = (raw) => {
+    const line = raw.trim();
+    if (!line) return;
+    let j;
+    try { j = JSON.parse(line); } catch (e) { return; }
+    if (j.d !== undefined) {
+      acc += j.d;
+      bubble.__acc = acc;
+      // троттлинг перерисовки: на телефонах без этого «дёрганья»
+      if (!bubble.__raf) {
+        bubble.__raf = requestAnimationFrame(() => {
+          bubble.__raf = 0;
+          paint(false);
+        });
+      }
+    } else if (j.error) {
+      throw Object.assign(new Error(j.error), { code: 502 });
+    } else {
+      meta = j;
+    }
+  };
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
+    if (onActivity) onActivity();
     buf += dec.decode(value, { stream: true });
     let nl;
     while ((nl = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, nl).trim();
+      consume(buf.slice(0, nl));
       buf = buf.slice(nl + 1);
-      if (!line) continue;
-      let j;
-      try { j = JSON.parse(line); } catch (e) { continue; }
-      if (j.d !== undefined) {
-        acc += j.d;
-        bubble.__acc = acc;
-        // троттлинг перерисовки: на телефонах без этого «дёрганья»
-        if (!bubble.__raf) {
-          bubble.__raf = requestAnimationFrame(() => {
-            bubble.__raf = 0;
-            paint(false);
-          });
-        }
-      }
-      else if (j.error) { throw Object.assign(new Error(j.error), { code: 502 }); }
-      else { meta = j; }
     }
   }
+  buf += dec.decode();                 // flush any split UTF-8 code point
+  if (buf.trim()) consume(buf);         // final NDJSON record may omit its LF
   bubble.classList.remove('streaming');
   paint(true);
   if (!meta) throw Object.assign(new Error('поток оборвался без мета-строки'),
@@ -841,54 +862,79 @@ async function _readStreamInner(res, reader, bubble) {
   return meta;
 }
 
+const CHAT_SILENCE_MS = 95000;
+
 async function chatRequest(cur, bubble) {
-  state.abortCtl = new AbortController();
+  let controller = null;
   let timedOut = false;
-  let silence = setTimeout(() => { timedOut = true; state.abortCtl.abort(); }, 95000);
+  let silence = null;
   let att = 0;
+  const clearSilence = () => {
+    if (silence !== null) clearTimeout(silence);
+    silence = null;
+  };
+  const markActivity = () => {
+    clearSilence();
+    silence = setTimeout(() => {
+      timedOut = true;
+      if (controller && !controller.signal.aborted) controller.abort();
+    }, CHAT_SILENCE_MS);
+  };
+  const newController = () => {
+    controller = new AbortController();
+    state.abortCtl = controller;
+    timedOut = false;
+    markActivity();
+  };
+  const abortError = (partial) => {
+    const err = new Error('остановлено');
+    err.name = 'AbortError';
+    err.aborted = true;
+    err.partial = partial || '';
+    return err;
+  };
+  newController();
+
   /* Пауза перед повтором: возвращаем пузырёк в «ждём», перевешиваем
-     AbortController и таймер тишины. Если за это время нажали «стоп» —
-     выходим как отмена, а не молча стартуем новый запрос. */
+     AbortController и idle-таймер. Ручной «стоп» отменяет и эту паузу. */
   async function prepareRetry(delay, partial) {
     bubble.classList.add('pending');
     bubble.classList.remove('streaming');
     bubble.innerHTML = '<span class="dots"><i></i><i></i><i></i></span>';
     delete bubble.__acc;        // хвост оборванного стрима всплыть не должен
     haptic('light');
+    clearSilence();
     await new Promise((r) => setTimeout(r, delay));
-    if (state.abortCtl.signal.aborted && !timedOut) {
-      const err = new Error('остановлено');
-      err.name = 'AbortError';
-      err.aborted = true;
-      err.partial = partial || '';
-      throw err;
+    if (state.stopRequested || (controller.signal.aborted && !timedOut)) {
+      throw abortError(partial);
     }
-    state.abortCtl = new AbortController();
-    timedOut = false;
-    clearTimeout(silence);
-    silence = setTimeout(() => { timedOut = true; state.abortCtl.abort(); }, 95000);
+    newController();
   }
+
   for (;;) {
     let res;
+    const requestController = controller;
     try {
       res = await fetch(API_BASE + '/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        signal: state.abortCtl.signal,
+        signal: requestController.signal,
         body: JSON.stringify({
           initData: INIT_DATA, provider: cur.provider, model: cur.model,
           messages: cur.messages, stream: !NO_STREAM,
         }),
       });
+      markActivity(); // headers arrived; give the response body a fresh idle window
     } catch (e) {
-      clearTimeout(silence);
-      if (timedOut) {
-        throw Object.assign(new Error('сервер молчит >95 секунд'), { code: 504 });
-      }
-      if (e && e.name === 'AbortError') {        // «стоп» — не сетевой сбой
+      clearSilence();
+      if (state.stopRequested || (e && e.name === 'AbortError' && !timedOut)) {
         e.aborted = true;
         e.partial = bubble.__acc || '';
         throw e;
+      }
+      if (timedOut) {
+        throw Object.assign(new Error('сервер молчит больше 95 секунд'),
+                            { code: 504, timedOut504: true });
       }
       const net = /Load failed|Failed to fetch|NetworkError|network/i
         .test(String(e && e.message));
@@ -901,24 +947,30 @@ async function chatRequest(cur, bubble) {
       await prepareRetry(att === 1 ? 900 : 2200, bubble.__acc);
       continue;
     }
-    clearTimeout(silence);
+
     const ct = res.headers.get('content-type') || '';
     if (res.ok && ct.includes('ndjson')) {
       try {
-        return await readStream(res, bubble);
+        const data = await readStream(res, bubble, markActivity);
+        if (timedOut) throw Object.assign(new Error('сервер молчит больше 95 секунд'),
+                                          { code: 504, timedOut504: true });
+        clearSilence();
+        return data;
       } catch (e) {
+        clearSilence();
         /* Тело ответа уже вычитано читателем, поэтому res.json() здесь
-           ничего не даст (в лучшем случае — «body stream already read»),
-           а на сорванной сети ещё и подвиснет. Про ошибку сервера мы всё
-           равно не узнаем — единственный надёжный путь: перечитать запрос
-           целиком. Надёжность важнее одного лишнего запроса. */
+           ничего не даст; на сорванной сети перечитываем запрос целиком. */
         const part = (e && e.partial) || bubble.__acc || '';
-        if (e && e.name === 'AbortError' && !timedOut) {   // явная отмена
+        if (state.stopRequested || (e && e.name === 'AbortError' && !timedOut)) {
           e.aborted = true;
           e.partial = part;
           throw e;
         }
         if (att >= 2) {
+          if (timedOut) {
+            throw Object.assign(new Error('сервер молчит больше 95 секунд'),
+              { code: 504, timedOut504: true, net: true, streamBroken: !!part, partial: part });
+          }
           throw Object.assign(new Error('связь оборвалась на середине ответа'),
             { code: 502, net: true, streamBroken: true, partial: part });
         }
@@ -927,18 +979,50 @@ async function chatRequest(cur, bubble) {
         continue;
       }
     }
-    // не-стримовый ответ: тело ещё не тронуто, читаем как обычно
-    const data = res.bodyUsed ? {} : await res.json().catch(() => ({}));
-    if (!res.ok) throw apiError(res.status, data);
-    bubble.classList.remove('pending');
-    renderRich(bubble, data.reply);
-    return data;
+
+    try {
+      // не-стримовый ответ: читаем JSON, пока действует idle-таймер
+      const data = res.bodyUsed ? {} : await res.json().catch((e) => {
+        if (timedOut || state.stopRequested) throw e;
+        return {};
+      });
+      if (timedOut) throw Object.assign(new Error('сервер молчит больше 95 секунд'),
+                                        { code: 504, timedOut504: true });
+      clearSilence();
+      if (!res.ok) throw apiError(res.status, data);
+      bubble.classList.remove('pending');
+      renderRich(bubble, data.reply);
+      return data;
+    } catch (e) {
+      clearSilence();
+      if (state.stopRequested || (e && e.name === 'AbortError' && !timedOut)) {
+        e.aborted = true;
+        e.partial = bubble.__acc || '';
+        throw e;
+      }
+      if (timedOut) {
+        throw Object.assign(new Error('сервер молчит больше 95 секунд'),
+                            { code: 504, timedOut504: true });
+      }
+      throw e;
+    }
   }
 }
 
 /* ================= отправка ================= */
 async function send(opts = {}) {
-  if (state.busy) return;
+  if (state.busy || state.sending) return;
+  state.sending = true;
+  state.stopRequested = false;
+  try {
+    return await performSend(opts);
+  } finally {
+    state.sending = false;
+    state.stopRequested = false;
+  }
+}
+
+async function performSend(opts = {}) {
   const regen = !!opts.regen;
   const input = $('#input');
   const lastU = regen && state.current
@@ -964,6 +1048,9 @@ async function send(opts = {}) {
     if (e.kind === 'subscribe' || e.kind === 'maintenance') return gateForError(e);
     return warn(e.human || t('chat.createFailed', { error: errorText(e, e.message) }));
   }
+  // An optimistic chat may have been removed after the server rejected its
+  // background create (for example, chat_limit); don't dereference null.
+  if (!state.current) return;
   const cur = state.current;
   const img = regen ? ((lastU && lastU.image) || null) : state.pendingImage;
   if (!regen) {
@@ -1034,17 +1121,8 @@ async function send(opts = {}) {
     cur.messages.push({ role: 'assistant', content: r.reply || pending.__acc || '',
                         provider: r.provider, model: r.model,
                         fallbacks: r.fallbacks || [] });
-    // на сервер история уходит с окном из 4 последних картинок,
-    // старшие самоудаляются, оставляя метку hasImage
-    const clean = cur.messages.map((m) => ({ ...m }));
-    applyImageWindow(clean);
     try {
-      if (String(cur.id).startsWith('local-')) await syncTempChat(cur);
-      await api('PUT', `/api/chats/${cur.id}`,
-                { messages: clean, title: cur.title,
-                  model: `${cur.provider}/${cur.model}` });
-      const row = state.chats.find(c => c.id === cur.id);
-      if (row) { row.title = cur.title; row.updated_at = new Date().toISOString(); }
+      await persistChat(cur);
     } catch (e) { warn(t('message.saveFailed', { error: e.message })); }
   } catch (e) {
     stopThinking();
@@ -1054,13 +1132,19 @@ async function send(opts = {}) {
       const stopped = !!e.aborted;
       if (part) {
         renderRich(pending, part);
-        const note = document.createElement('div');
-        note.className = 'stop-note';
-        note.dataset.i18n = stopped ? 'message.stoppedSaved' : 'message.disconnectedSaved';
-        note.textContent = t(note.dataset.i18n);
-        pending.appendChild(note);
-        cur.messages.push({ role: 'assistant', content: part });
-        warn(t(stopped ? 'message.stoppedSavedToast' : 'message.disconnectedToast'));
+        cur.messages.push({ role: 'assistant', content: part,
+                            provider: cur.provider, model: cur.model });
+        try {
+          await persistChat(cur);
+          const note = document.createElement('div');
+          note.className = 'stop-note';
+          note.dataset.i18n = stopped ? 'message.stoppedSaved' : 'message.disconnectedSaved';
+          note.textContent = t(note.dataset.i18n);
+          pending.appendChild(note);
+          warn(t(stopped ? 'message.stoppedSavedToast' : 'message.disconnectedToast'));
+        } catch (saveError) {
+          warn(t('message.saveFailed', { error: saveError.message }));
+        }
       } else {
         pending.remove();
         warn(t('message.stoppedToast'));
@@ -1112,6 +1196,19 @@ function applyImageWindow(msgs) {
     delete msgs[i].image;
     msgs[i].hasImage = true;
   });
+}
+
+/* Store both completed and user-stopped partial replies with identical image
+   pruning and temp-chat recovery rules. */
+async function persistChat(cur) {
+  const clean = cur.messages.map((m) => ({ ...m }));
+  applyImageWindow(clean);
+  if (String(cur.id).startsWith('local-')) await syncTempChat(cur);
+  await api('PUT', `/api/chats/${cur.id}`, {
+    messages: clean, title: cur.title, model: `${cur.provider}/${cur.model}`,
+  });
+  const row = state.chats.find((c) => c.id === cur.id);
+  if (row) { row.title = cur.title; row.updated_at = new Date().toISOString(); }
 }
 
 function setSendUI(busy) {
@@ -1686,10 +1783,12 @@ async function boot() {
   const ttBtn = $('#btn-title');
   if (ttBtn) ttBtn.onclick = ctxOpen;
   $('#btn-new').onclick = () => {
+    if (blockDuringSend()) return;
     haptic('light');
     closeSheets();
-    const def = state.models.find((m) => m.available) || state.models[0] || {};
-    createChatOptimistic(def.provider || '', def.model || '');
+    const def = getDefaultModel();
+    if (!def.model) { openSheet('#model-sheet'); return; }
+    createChatOptimistic(def.provider || '', def.model);
   };
   document.querySelectorAll('.sheet-back, .sheet-close').forEach(el => {
     el.onclick = closeSheets;
@@ -1699,6 +1798,7 @@ async function boot() {
   $('#btn-send').onclick = () => {
     if (state.busy) {
       haptic('light');
+      state.stopRequested = true;
       if (state.abortCtl) state.abortCtl.abort();
     } else {
       send();
@@ -1815,6 +1915,7 @@ async function boot() {
   const wipe = $('#btn-wipe');
   const wipeLabel = wipe.querySelector('span');
   wipe.onclick = async () => {
+    if (blockDuringSend()) return;
     if (!wipe.dataset.arm) {
       wipe.dataset.arm = '1';
       wipeLabel.textContent = t('settings.eraseConfirm');
@@ -1867,6 +1968,7 @@ async function boot() {
     });
   }
   $('#cm-delete').onclick = () => {
+    if (blockDuringSend()) return;
     closeChatMenu();
     const id = state.current && state.current.id;
     if (!id) return;

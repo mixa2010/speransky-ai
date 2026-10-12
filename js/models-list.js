@@ -1,32 +1,92 @@
 /* Model categories and chooser rows. Text labels are resolved through i18n.js. */
 'use strict';
+const CODE_MODEL_RE = /code|coder|codestral|leanstral|coder480b/i;
+const MAX_RECOMMENDED_MODELS = 4;
 const CATS = [
-  { id: 'text', title: 'model.cat.textTitle', short: 'model.cat.text', icon: 'catText' },
+  { id: 'recommended', title: 'model.cat.recommendedTitle', short: 'model.cat.recommended', icon: 'bulb' },
+  { id: 'all', title: 'model.cat.allTitle', short: 'model.cat.all', icon: 'catText' },
   { id: 'code', title: 'model.cat.codeTitle', short: 'model.cat.code', icon: 'catCode',
-    filter: /code|coder|codestral|leanstral|coder480b/i },
+    filter: CODE_MODEL_RE },
   { id: 'image', title: 'model.cat.imagesTitle', short: 'model.cat.images',
     icon: 'catImage', soon: true },
   { id: 'video', title: 'model.cat.videoTitle', short: 'model.cat.video', icon: 'catVideo', soon: true },
 ];
 
+function modelSelectable(m) {
+  return !!m && m.available !== false && String(m.state || '').toLowerCase() !== 'dead';
+}
+
+function modelDisplayState(m) {
+  const state = String(m && m.state || '').toLowerCase();
+  if (state === 'dead') return 'dead';
+  if (m && m.available === false) return 'unavailable';
+  return state || 'unknown';
+}
+
+function sortModels(models) {
+  return (Array.isArray(models) ? models : []).slice().sort((a, b) => {
+    const unavailable = Number(!modelSelectable(a)) - Number(!modelSelectable(b));
+    if (unavailable) return unavailable;
+    const recommended = Number(b && b.recommended === true) - Number(a && a.recommended === true);
+    if (recommended) return recommended;
+    return (STATE_RANK[modelDisplayState(a)] ?? 5) -
+           (STATE_RANK[modelDisplayState(b)] ?? 5);
+  });
+}
+
+function recommendedModels() {
+  return sortModels(state.models).filter(modelSelectable).slice(0, MAX_RECOMMENDED_MODELS);
+}
+
+function getDefaultModel() {
+  return sortModels(state.models).find(modelSelectable) || {};
+}
+
 function modelRow(m) {
   const mine = !!(state.current && state.current.provider === m.provider &&
     state.current.model === m.model);
-  const row = document.createElement('div');
-  row.className = 'model-row ' + (m.state || 'ok') + (mine ? ' active' : '');
-  const titleEl = document.createElement('div');
+  const selectable = modelSelectable(m);
+  const status = modelDisplayState(m);
+  const statusClass = !selectable ? 'dead' :
+    (STATE_RANK[status] !== undefined ? status : 'unknown');
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.disabled = !selectable;
+  row.setAttribute('aria-pressed', mine ? 'true' : 'false');
+  row.title = modelStateTitle(status);
+  row.className = 'model-row ' + statusClass + (mine ? ' active' : '');
+
+  const titleEl = document.createElement('span');
   titleEl.className = 'model-row-title';
-  titleEl.innerHTML = logoHtml(m.provider) + ' ' + esc(m.model) +
-    (mine ? '<span class="mr-check" aria-label="' + esc(t('model.selected')) + '">' + IC.check + '</span>' : '') +
-    (m.vision ? ' <span class="vis-dot" title="' + esc(t('model.understandsPhoto')) + '"></span>' : '');
-  const s2 = document.createElement('div');
-  s2.className = 'model-row-sub';
-  s2.textContent = m.provider + ' · ' + modelStateLabel(m.state);
+  titleEl.innerHTML = logoHtml(m.provider);
+  const name = document.createElement('span');
+  name.className = 'model-name';
+  name.textContent = String(m.model || '');
+  titleEl.appendChild(name);
+  if (mine) {
+    const check = document.createElement('span');
+    check.className = 'mr-check';
+    check.setAttribute('aria-label', t('model.selected'));
+    check.innerHTML = IC.check;
+    titleEl.appendChild(check);
+  }
+  if (m.vision) {
+    const capability = document.createElement('span');
+    capability.className = 'model-capability';
+    capability.textContent = t('model.understandsPhoto');
+    capability.title = t('model.understandsPhoto');
+    titleEl.appendChild(capability);
+  }
+
+  const sub = document.createElement('span');
+  sub.className = 'model-row-sub';
+  sub.textContent = String(m.provider || '') + ' · ' + modelStateLabel(status);
   const dot = document.createElement('span');
-  dot.className = 'st-dot st-' + (m.state || 'ok');
-  dot.title = modelStateTitle(m.state);
-  dot.setAttribute('aria-label', dot.title);
+  dot.className = 'st-dot st-' + statusClass;
+  dot.title = modelStateTitle(status);
+  dot.setAttribute('aria-hidden', 'true');
   row.onclick = () => {
+    if (!selectable || blockDuringSend()) return;
     hapticSel();
     closeSheets();                       // мгновенно, не ждём сервер
     if (state.current) {
@@ -38,11 +98,13 @@ function modelRow(m) {
       createChatOptimistic(m.provider, m.model);
     }
   };
-  row.appendChild(titleEl); row.appendChild(dot); row.appendChild(s2);
+  row.appendChild(titleEl);
+  row.appendChild(dot);
+  row.appendChild(sub);
   return row;
 }
 
-/* Category tabs: text / code / images / video. */
+/* Category tabs: recommendations, full catalogue, code, image and video. */
 function renderModelTabs() {
   const box = $('#model-tabs');
   if (!box) return;
@@ -55,6 +117,7 @@ function renderModelTabs() {
     b.setAttribute('role', 'tab');
     b.setAttribute('aria-selected', state.modelTab === cat.id ? 'true' : 'false');
     b.setAttribute('aria-label', t(cat.title));
+    b.setAttribute('aria-controls', 'models-list');
     b.innerHTML = (IC[cat.icon] || '') + '<span>' + esc(t(cat.short)) + '</span>' +
       (cat.soon ? '<i class="tab-lock">' + IC.lock + '</i>' : '');
     b.onclick = () => {
@@ -104,9 +167,7 @@ function renderModelsList() {
     note.className = 'soon-row';
     note.textContent = found.length ? t('model.searchAll') : t('model.searchNone');
     box.appendChild(note);
-    const sorted = found.slice().sort((a, b) =>
-      (STATE_RANK[a.state] ?? 3) - (STATE_RANK[b.state] ?? 3));
-    for (const m of sorted) box.appendChild(modelRow(m));
+    for (const m of sortModels(found)) box.appendChild(modelRow(m));
     box.querySelectorAll('.model-row').forEach((el, i) => {
       el.classList.add('tab-in');
       el.style.animationDelay = Math.min(i * 22, 220) + 'ms';
@@ -123,12 +184,27 @@ function renderModelsList() {
     box.appendChild(soon);
     return;
   }
-  const sorted = state.models.slice().sort((a, b) =>
-    (STATE_RANK[a.state] ?? 3) - (STATE_RANK[b.state] ?? 3));
-  // A filtered category gets its own models; other categories omit those rows.
+  if (cat.id === 'recommended') {
+    const note = document.createElement('div');
+    note.className = 'model-recommend-hint';
+    note.textContent = t('model.recommendedHint');
+    box.appendChild(note);
+    const picks = recommendedModels();
+    if (!picks.length) {
+      const none = document.createElement('div');
+      none.className = 'sheet-empty';
+      none.textContent = t('model.noneAvailable');
+      box.appendChild(none);
+      return;
+    }
+    for (const m of picks) box.appendChild(modelRow(m));
+    return;
+  }
+
+  const sorted = sortModels(state.models);
   const list = cat.filter
-    ? sorted.filter((m) => cat.filter.test(m.model))
-    : sorted.filter((m) => !CATS.some((c) => c.filter && c.filter.test(m.model)));
+    ? sorted.filter((m) => cat.filter.test(String(m.model || '')))
+    : sorted;
   if (!list.length) {
     const none = document.createElement('div');
     none.className = 'soon-row';
