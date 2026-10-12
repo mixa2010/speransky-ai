@@ -10,8 +10,5 @@ const _params = new URLSearchParams(location.search);
 const API_BASE = DEFAULT_API.replace(/\/+$/, '');
 const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : null;
 const INIT_DATA = (tg && tg.initData) || _params.get('initData') || '';
-const VOICE_DISABLED_MESSAGE = 'Голосовой ввод отключён — напишите запрос текстом';
-const SESSION_MESSAGE = 'Сессия не подтвердилась. Закрой и открой приложение из чата с ботом.';
-
 const $ = (s) => document.querySelector(s);
 

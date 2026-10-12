@@ -4,29 +4,28 @@
 'use strict';
 
 /* ================= время в списке чатов ================= */
-const MONTHS_RU = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн',
-                   'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
-
 function sameDay(a, b) {
   return a.getFullYear() === b.getFullYear() &&
          a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
-function pad2(n) { return String(n).padStart(2, '0'); }
 
-/* «09:01» сегодня, «вчера», «11 окт», «11.10.25» — вместо машинного
-   «10-11T09:01», которое показывал прежний slice(). */
+/* Human-readable timestamps use the selected interface locale. */
 function fmtWhen(iso) {
   const raw = String(iso || '');
-  const t = Date.parse(raw);
-  if (!t) return raw.length >= 16 ? raw.slice(11, 16) : '';
-  const d = new Date(t);
+  const timestamp = Date.parse(raw);
+  if (!timestamp) return raw.length >= 16 ? raw.slice(11, 16) : '';
+  const d = new Date(timestamp);
   const now = new Date();
-  const hm = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
-  if (sameDay(d, now)) return hm;
+  const locale = typeof getLocale === 'function' ? getLocale() : 'en-US';
+  const format = (date, options) => {
+    try { return new Intl.DateTimeFormat(locale, options).format(date); }
+    catch (e) { return date.toLocaleDateString(); }
+  };
+  if (sameDay(d, now)) return format(d, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
   const yest = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-  if (sameDay(d, yest)) return 'вчера';
-  if (d.getFullYear() === now.getFullYear()) return d.getDate() + ' ' + MONTHS_RU[d.getMonth()];
-  return pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1) + '.' + String(d.getFullYear()).slice(2);
+  if (sameDay(d, yest)) return typeof t === 'function' ? t('date.yesterday') : 'yesterday';
+  if (d.getFullYear() === now.getFullYear()) return format(d, { day: 'numeric', month: 'short' });
+  return format(d, { year: '2-digit', month: '2-digit', day: '2-digit' });
 }
 
 /* Группа для заголовков списка чатов: 0 сегодня, 1 вчера, 2 эта неделя,

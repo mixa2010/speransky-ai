@@ -1,23 +1,12 @@
-/* Статусы моделей (подписи и ранги). Выделено из app.js; загружается до app.js
-   и разделяет с ним глобальную область (обычный скрипт). */
+/* Model state ranks and locale-aware labels for the model chooser. */
 'use strict';
 const STATE_RANK = { ok: 0, new: 1, unstable: 2, cooldown: 3, dead: 4 };
-/* Короткие честные подписи статусов: без «процентов здоровья» —
-   статус считает сервер по последним реальным ответам модели. */
-const STATE_RU = {
-  ok: 'работает',
-  new: 'новая, ещё не проверена',
-  unstable: 'нестабильна (были сбои)',
-  cooldown: 'отдыхает после лимита',
-  dead: 'недоступна этому ключу',
-};
-const STATE_TT = {
-  ok: 'Отвечает стабильно',
-  new: 'Ещё не проверяли в деле',
-  unstable: 'Последние ответы были со сбоями',
-  cooldown: 'Бесплатный лимит исчерпан — скоро вернётся',
-  dead: 'Ключ провайдера не отдаёт эту модель',
-};
-/* Оптимистичное создание чата: UI открывается мгновенно, POST уходит
-   в фоне. state.chatReady — промис фонового сохранения; перед любыми
-   серверными операциями с этим чатом его дожидаются send()/openChat(). */
+
+function modelStateLabel(state) {
+  const key = 'model.status.' + state;
+  return (I18N[getLanguage()] && I18N[getLanguage()][key]) || I18N.en[key] || t('model.unknownStatus');
+}
+function modelStateTitle(state) {
+  const key = 'model.statusTip.' + state;
+  return (I18N[getLanguage()] && I18N[getLanguage()][key]) || t('model.unknownStatus');
+}

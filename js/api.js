@@ -46,22 +46,22 @@ function apiError(status, data) {
   let kind = '';
   if (status === 401) {
     kind = 'session';
-    human = SESSION_MESSAGE;
+    human = t('error.session');
   } else if (status === 403 && reason === 'subscribe') {
     kind = 'subscribe';
-    human = serverText(data, 'Чтобы пользоваться Сперанским AI, подпишись на канал.');
+    human = serverText(data, t('api.subscribeFallback'));
   } else if (status === 503 && reason === 'maintenance') {
     kind = 'maintenance';
-    human = serverText(data, 'Идут технические работы. Загляни чуть позже.');
+    human = serverText(data, t('api.maintenanceFallback'));
   } else if (status === 429 && data.error === 'quota') {
     kind = 'quota';
-    human = serverText({ message: data.message }, 'Лимит запросов на сегодня закончился.');
+    human = serverText({ message: data.message }, t('api.quotaFallback'));
   } else if (status === 503 && data.error === 'busy') {
     kind = 'busy';
-    human = serverText({ message: data.message }, 'Сейчас много запросов. Попробуй через минуту.');
+    human = serverText({ message: data.message }, t('api.busyFallback'));
   } else if (status === 409 && reason === 'chat_limit') {
     kind = 'chat_limit';
-    human = serverText(data, 'Чатов слишком много: удали старый, чтобы создать новый.');
+    human = serverText(data, t('api.chatLimitFallback'));
   } else if (status === 403) {
     kind = 'forbidden';
     human = serverText(data, null);
@@ -91,13 +91,14 @@ async function api(method, path, body) {
   try {
     res = await fetch(url, opts);
   } catch (e) {
-    throw Object.assign(new Error('нет связи с сервером'), { code: 0, net: true });
+    throw Object.assign(new Error(t('api.serverOffline')), { code: 0, net: true });
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     if (res.status === 410 && data.error === 'voice_disabled') {
-      warn(VOICE_DISABLED_MESSAGE);
-      throw Object.assign(new Error(VOICE_DISABLED_MESSAGE),
+      const voiceMessage = t('error.voiceDisabled');
+      warn(voiceMessage);
+      throw Object.assign(new Error(voiceMessage),
                           { code: 410, voiceDisabled: true });
     }
     throw apiError(res.status, data);

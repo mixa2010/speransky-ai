@@ -7,13 +7,13 @@
    Render несёт Telegram initData, подпись проверяется сервером.
    ============================================================ */
 'use strict';
-window.__APP_V = '20261011e';
+window.__APP_V = '20261012a';
 const FALL_REASON = {
-  rate: 'кончился лимит',
-  cooldown: 'на кулдауне',
-  error: 'сбой',
-  unfit: 'не подходит',
-  empty: 'пустой ответ',
+  rate: 'model.fallback.rate',
+  cooldown: 'model.fallback.cooldown',
+  error: 'model.fallback.error',
+  unfit: 'model.fallback.unfit',
+  empty: 'model.fallback.empty',
 };
 
 const state = {
@@ -31,6 +31,7 @@ const state = {
   theme: 'system',        // system | dark | light
   accent: 'blue',         // blue | violet | green | orange
   haptics: true,
+  language: getLanguage(), // persistent UI locale; English on first launch
   pins: [],               // закреплённые чаты
   quota: null,            // {left_day, unlimited} с сервера
   policy: null,           // {free, donate_url, donate_note} из /api/boot и /api/quota
@@ -56,15 +57,6 @@ function warn(text, kind) {
   warn._t = setTimeout(() => { w.hidden = true; }, kind === 'ok' ? 3200 : 6000);
 }
 
-/* Русские формы: 1 запрос / 2 запроса / 5 запросов */
-function plural(n, one, few, many) {
-  const a = Math.abs(n) % 100, b = a % 10;
-  if (a > 10 && a < 20) return many;
-  if (b === 1) return one;
-  if (b >= 2 && b <= 4) return few;
-  return many;
-}
-
 /* Экран-заглушка вместо чата: ошибка, подписка или техработы.
    Чат при этом не открывается; «Повторить» перезагружает приложение. */
 function showGate(opts) {
@@ -77,8 +69,8 @@ function showGate(opts) {
   closeSheets();
   $('#fatal').hidden = false;
   $('#fatal-emoji').textContent = o.emoji || '🤔';
-  $('#fatal-title').textContent = o.title || 'Не открылось';
-  $('#fatal-text').textContent = o.text || 'Что-то пошло не так.';
+  $('#fatal-title').textContent = o.title || t('app.notOpened');
+  $('#fatal-text').textContent = o.text || t('app.genericError');
   const sub = $('#fatal-subscribe');
   if (sub) {
     sub.hidden = !o.channelUrl;
@@ -94,21 +86,21 @@ function showFatal(text) {
 function gateForError(e) {
   if (!e) return false;
   if (e.kind === 'subscribe') {
-    showGate({ emoji: '📣', title: 'Нужна подписка', text: e.human,
+    showGate({ emoji: '📣', title: t('app.subscribeRequired'), text: e.human,
                channelUrl: e.channelUrl });
     return true;
   }
   if (e.kind === 'maintenance') {
-    showGate({ emoji: '🛠', title: 'Технические работы', text: e.human });
+    showGate({ emoji: '🛠', title: t('app.maintenance'), text: e.human });
     return true;
   }
   if (e.code === 401) {
-    showGate({ title: 'Сессия не подтвердилась', text: SESSION_MESSAGE });
+    showGate({ title: t('app.sessionFailed'), text: t('error.session') });
     return true;
   }
   if (e.kind === 'forbidden') {
-    showGate({ title: 'Нет доступа',
-               text: e.human || 'Доступ закрыт. Открой приложение из чата с ботом.' });
+    showGate({ title: t('app.noAccess'),
+               text: e.human || t('app.noAccessText') });
     return true;
   }
   return false;
@@ -117,10 +109,10 @@ function gateForError(e) {
 /* Короткий понятный текст ошибки для пузыря/плашки. */
 function errorText(e, fallback) {
   if (!e) return fallback;
-  if (e.code === 401) return SESSION_MESSAGE;
+  if (e.code === 401) return t('error.session');
   if (e.human) return e.human;
-  if (e.code === 504) return 'Сервер не ответил вовремя.';
-  if (e.net) return 'Не удалось отправить: связь мигнула.';
+  if (e.code === 504) return t('message.serverTimeout');
+  if (e.net) return t('message.network');
   return fallback;
 }
 
@@ -130,13 +122,13 @@ function shortModel(m) {
 
 function updateHead() {
   document.title = state.current
-    ? (state.current.title || 'Чат') + ' — Сперанский AI'
-    : 'Сперанский AI';
+    ? (state.current.title || t('chat.title')) + ' — ' + t('app.title')
+    : t('app.title');
   const inp = $('#input');
-  if (inp) inp.placeholder = 'Спроси Сперанского…';
-  /* название текущего чата — слева в шапке (тап открывает меню чата) */
+  if (inp) inp.placeholder = t('composer.placeholder');
+  /* Current chat title sits in the header and opens the chat menu. */
   const tt = $('#head-title');
-  if (tt) tt.textContent = state.current ? (state.current.title || 'Чат') : 'Сперанский AI';
+  if (tt) tt.textContent = state.current ? (state.current.title || t('chat.title')) : t('app.title');
   /* пилюля модели: логотип провайдера + короткое имя */
   const name = $('#hp-name');
   const lg = $('#hp-logo');
@@ -146,14 +138,14 @@ function updateHead() {
       name.textContent = shortModel(state.current.model);
     } else {
       lg.innerHTML = '';
-      name.textContent = 'модель';
+      name.textContent = t('header.model');
     }
   }
   /* правая кнопка хедера меняет роль: инфо о данных → меню чата */
   const ctx = $('#btn-ctx');
   if (ctx) {
     const has = !!(state.current && state.current.messages.length);
-    ctx.title = has ? 'Меню чата' : 'Как хранятся данные';
+    ctx.title = has ? t('header.chatMenu') : t('header.dataInfo');
     ctx.setAttribute('aria-label', ctx.title);
   }
 }
@@ -224,7 +216,7 @@ function fallbackLine(fallbacks, finalProvider, finalModel) {
     const chip = document.createElement('span');
     chip.className = 'fall-chip';
     const reason = f.code === 'rate' || f.code === 'cooldown'
-      ? ' · ' + esc(FALL_REASON[f.code]) : '';
+      ? ' · ' + esc(t(FALL_REASON[f.code])) : '';
     chip.innerHTML = logoHtml(f.provider) + ' ' + esc(shortModel(f.model)) + reason;
     row.appendChild(chip);
     const ar = document.createElement('span');
@@ -259,7 +251,8 @@ function addMessageEl(role, text, opts = {}) {
     } else if (opts.hasImage) {
       const ph = document.createElement('div');
       ph.className = 'msg-img-ph';
-      ph.textContent = '📷 фото прикреплялось (в истории не хранится)';
+      ph.dataset.i18n = 'message.imageExpired';
+      ph.textContent = t('message.imageExpired');
       bubble.appendChild(ph);
     }
     if (text) bubble.appendChild(document.createTextNode(text));
@@ -300,43 +293,46 @@ async function copyText(t, quiet) {
     ta.remove();
     if (prev && prev.id === 'input') { try { prev.focus({ preventScroll: true }); } catch (e3) {} }
   }
-  if (!quiet) warn('Скопировано в буфер обмена.', 'ok');
+  if (!quiet) warn(t('message.copied'), 'ok');
 }
 
-/* Кнопки под ответом. На телефоне — одни иконки, на десктопе к ним
-   добавляются подписи (.act-tx). Копирование подтверждается галочкой
-   прямо в кнопке — тост поверх шапки больше не нужен. */
+/* Action labels are tagged so a language change updates existing messages too. */
 function buildActions(text, canRegen) {
   const acts = document.createElement('div');
   acts.className = 'msg-actions';
-  const mk = (cls, title, label, icon, fn) => {
+  const mk = (cls, titleKey, labelKey, icon, fn) => {
     const b = document.createElement('button');
     b.className = 'act-btn' + (cls ? ' ' + cls : '');
     b.type = 'button';
-    b.title = title;
-    b.setAttribute('aria-label', title);
-    b.innerHTML = icon + (label ? '<span class="act-tx">' + label + '</span>' : '');
+    b.title = t(titleKey);
+    b.dataset.i18nTitle = titleKey;
+    b.setAttribute('aria-label', t(titleKey));
+    b.dataset.i18nAriaLabel = titleKey;
+    b.innerHTML = icon + (labelKey
+      ? '<span class="act-tx" data-i18n="' + labelKey + '">' + esc(t(labelKey)) + '</span>' : '');
     b.onclick = (e) => { e.stopPropagation(); fn(b); };
     acts.appendChild(b);
     return b;
   };
-  mk('', 'Скопировать ответ', 'Копировать', IC.copy, (btn) => {
+  mk('', 'message.copyAnswer', 'message.copy', IC.copy, (btn) => {
     haptic('light');
     copyText(text, true);
     btn.classList.add('done');
-    btn.innerHTML = IC.check + '<span class="act-tx">Готово</span>';
+    btn.innerHTML = IC.check + '<span class="act-tx" data-i18n="message.done">' +
+      esc(t('message.done')) + '</span>';
     clearTimeout(btn._t);
     btn._t = setTimeout(() => {
       btn.classList.remove('done');
-      btn.innerHTML = IC.copy + '<span class="act-tx">Копировать</span>';
+      btn.innerHTML = IC.copy + '<span class="act-tx" data-i18n="message.copy">' +
+        esc(t('message.copy')) + '</span>';
     }, 1500);
   });
   if (canRegen) {
-    mk('act-regen', 'Перегенерировать ответ', 'Заново', IC.regen, () => {
+    mk('act-regen', 'message.regenerate', 'message.again', IC.regen, () => {
       hapticSel(); regenerateLast();
     });
   }
-  mk('', 'Поделиться ответом', 'Поделиться', IC.shareIc, () => {
+  mk('', 'message.shareAnswer', 'message.share', IC.shareIc, () => {
     haptic('light'); shareText(text);
   });
   return acts;
@@ -365,15 +361,11 @@ function regenerateLast() {
   const msgs = state.current.messages;
   while (msgs.length && msgs[msgs.length - 1].role === 'assistant') msgs.pop();
   if (!msgs.length || msgs[msgs.length - 1].role !== 'user') {
-    return warn('Не нашёл вопрос для перегенерации.');
+    return warn(t('chat.noQuestionToRegenerate'));
   }
   paintMessages();          // вопрос на месте, старый ответ уже снят
   send({ regen: true });
 }
-
-const EMPTY_TITLE = 'Привет! Я Сперанский AI';
-const EMPTY_TEXT = 'Универсальный помощник: текст, код, объяснение, план, учёба.' +
-  '<br>Начни с одного из действий:';
 
 function paintMessages() {
   const box = $('#messages');
@@ -389,12 +381,15 @@ function paintMessages() {
   const ex = $('#empty-text');
   if (cta) cta.hidden = !!state.current;
   if (et && ex && msgs.length === 0 && state.current) {
-    et.textContent = 'Чат готов';
-    ex.innerHTML = 'Модель ' + esc(shortModel(state.current.model)) +
-      ' на связи. Напиши первый вопрос или прикрепи фото плюсом.';
+    et.dataset.i18n = 'empty.chatReady';
+    et.textContent = t('empty.chatReady');
+    delete ex.dataset.i18nHtml;
+    ex.textContent = t('empty.chatReadyText', { model: shortModel(state.current.model) });
   } else if (et && ex && !state.current) {
-    et.textContent = EMPTY_TITLE;
-    ex.innerHTML = EMPTY_TEXT;
+    et.dataset.i18n = 'empty.greeting';
+    et.textContent = t('empty.greeting');
+    ex.dataset.i18nHtml = 'empty.description';
+    ex.innerHTML = t('empty.description');
   }
   let lastBot = -1;
   msgs.forEach((m, i) => { if (m.role !== 'user') lastBot = i; });
@@ -430,14 +425,14 @@ async function openChat(id) {
     // чат ещё создаётся на сервере — дожидаемся и берём настоящий id
     if (state.chatReady) {
       try { await state.chatReady; }
-      catch (e) { return warn('Чат ещё создаётся — попробуй чуть позже.'); }
+      catch (e) { return warn(t('chat.createLater')); }
     }
     id = state.tempMap[id] || id;
   }
   const row = await api('GET', `/api/chats/${id}`);
   const pm = parseModel(row.model);
   state.current = {
-    id: row.id, title: row.title || 'Чат',
+    id: row.id, title: row.title || t('chat.title'),
     provider: pm.provider, model: pm.model,
     messages: row.messages || [],
   };
@@ -449,12 +444,12 @@ async function openChat(id) {
 async function createChat() {
   const def = state.models.find(m => m.available) || state.models[0] || {};
   const row = await api('POST', '/api/chats', {
-    title: 'Новый чат', model: `${def.provider || ''}/${def.model || ''}`,
+    title: t('chat.newTitle'), model: `${def.provider || ''}/${def.model || ''}`,
   });
   state.chats.unshift(row);
   const pm = parseModel(row.model);
-  state.current = { id: row.id, title: row.title, provider: pm.provider,
-                    model: pm.model, messages: [] };
+  state.current = { id: row.id, title: row.title || t('chat.newTitle'), isNew: true,
+                    provider: pm.provider, model: pm.model, messages: [] };
   updateHead();
   paintMessages();
 }
@@ -493,32 +488,34 @@ async function deleteChat(id) {
 function chatRowEl(c) {
   const row = document.createElement('div');
   row.className = 'chat-row' + (state.current && state.current.id === c.id ? ' active' : '');
-  const t = document.createElement('div');
-  t.className = 'chat-row-title';
-  t.innerHTML = (state.pins.includes(c.id) ? IC.pin : '') + esc(c.title || 'Чат');
-  const s = document.createElement('div');
-  s.className = 'chat-row-sub';
+  const titleEl = document.createElement('div');
+  titleEl.className = 'chat-row-title';
+  titleEl.innerHTML = (state.pins.includes(c.id) ? IC.pin : '') + esc(c.title || t('chat.title'));
+  const sub = document.createElement('div');
+  sub.className = 'chat-row-sub';
   const model = document.createElement('span');
   model.className = 'sub-model';
-  model.textContent = shortModel(c.model) || 'модель';
+  model.textContent = shortModel(c.model) || t('header.model');
   const when = document.createElement('span');
   when.className = 'sub-time';
   when.textContent = fmtWhen(c.updated_at);
-  s.appendChild(model);
-  s.appendChild(when);
+  sub.appendChild(model);
+  sub.appendChild(when);
   const del = document.createElement('button');
   del.className = 'icon-btn chat-del';
-  del.title = 'Удалить чат';
-  del.setAttribute('aria-label', 'Удалить чат');
+  del.title = t('chat.delete');
+  del.dataset.i18nTitle = 'chat.delete';
+  del.setAttribute('aria-label', t('chat.delete'));
+  del.dataset.i18nAriaLabel = 'chat.delete';
   del.innerHTML = IC.x;
   del.onclick = (e) => {
     e.stopPropagation();
     if (del.dataset.arm) {
-      deleteChat(c.id).catch((e) => warn('Не удалось удалить чат: ' + e.message));
+      deleteChat(c.id).catch((err) => warn(t('chat.deleteFailed', { error: err.message })));
       return;
     }
     del.dataset.arm = '1';
-    del.textContent = 'точно?';
+    del.textContent = t('chat.deleteSure');
     del.classList.add('armed');
     clearTimeout(del._t);
     del._t = setTimeout(() => {
@@ -528,8 +525,8 @@ function chatRowEl(c) {
     }, 3000);
   };
   row.onclick = () => openChat(c.id)
-    .catch((e) => warn('Не удалось открыть чат: ' + e.message));
-  row.appendChild(t); row.appendChild(s); row.appendChild(del);
+    .catch((err) => warn(t('chat.openFailed', { error: err.message })));
+  row.appendChild(titleEl); row.appendChild(sub); row.appendChild(del);
   return row;
 }
 
@@ -538,33 +535,41 @@ function renderChatsList() {
   const box = $('#chats-list');
   box.innerHTML = '';
   const label = $('#chats-label');
-  if (label) label.textContent = state.chats.length ? 'Чаты · ' + state.chats.length : 'Чаты';
+  const count = new Intl.NumberFormat(getLocale()).format(state.chats.length);
+  if (label) label.textContent = state.chats.length
+    ? t('drawer.chats') + ' · ' + count : t('drawer.chats');
   const q = (state.chatFilter || '').trim().toLowerCase();
   const list = state.chats
     .filter((c) => !q || String(c.title || '').toLowerCase().includes(q) ||
                           String(c.model || '').toLowerCase().includes(q))
     .sort((a, b) => (state.pins.includes(b.id) ? 1 : 0) - (state.pins.includes(a.id) ? 1 : 0));
+  const showEmpty = (message) => {
+    const empty = document.createElement('div');
+    empty.className = 'sheet-empty';
+    empty.textContent = message;
+    box.appendChild(empty);
+  };
   if (!state.chats.length) {
-    box.innerHTML = '<div class="sheet-empty">Чатов пока нет — нажми «Новый чат» ' +
-      'или просто напиши сообщение.</div>';
+    showEmpty(t('chat.listEmpty'));
     return;
   }
   if (!list.length) {
-    box.innerHTML = '<div class="sheet-empty">Ничего не нашлось по запросу «' +
-      esc(q) + '».</div>';
+    showEmpty(t('chat.searchEmpty', { query: q }));
     return;
   }
-  const groups = [['Закреплённые', []], ['Сегодня', []], ['Вчера', []],
-                  ['На этой неделе', []], ['Раньше', []]];
+  const groups = [
+    ['chat.group.pinned', []], ['chat.group.today', []], ['chat.group.yesterday', []],
+    ['chat.group.week', []], ['chat.group.older', []],
+  ];
   for (const c of list) {
     if (state.pins.includes(c.id)) groups[0][1].push(c);
     else groups[dayBucket(c.updated_at) + 1][1].push(c);
   }
-  for (const [name, items] of groups) {
+  for (const [key, items] of groups) {
     if (!items.length) continue;
     const head = document.createElement('div');
     head.className = 'chat-group';
-    head.textContent = name;
+    head.textContent = t(key);
     box.appendChild(head);
     for (const c of items) box.appendChild(chatRowEl(c));
   }
@@ -573,7 +578,7 @@ function renderChatsList() {
 function createChatOptimistic(provider, model) {
   const tempId = 'local-' + Date.now().toString(36) + '-' +
                  Math.random().toString(36).slice(2, 7);
-  const cur = { id: tempId, title: 'Новый чат', provider, model, messages: [] };
+  const cur = { id: tempId, title: t('chat.newTitle'), isNew: true, provider, model, messages: [] };
   const tempRow = { id: tempId, title: cur.title,
                     model: `${provider}/${model}`,
                     updated_at: new Date().toISOString() };
@@ -581,7 +586,7 @@ function createChatOptimistic(provider, model) {
   state.chats.unshift(tempRow);
   updateHead();
   paintMessages();
-  if (model) warn(`Чат создан с моделью ${shortModel(model)}.`);
+  if (model) warn(t('chat.createdWithModel', { model: shortModel(model) }));
   pushChatToServer(cur, tempRow);
 }
 
@@ -609,8 +614,7 @@ function pushChatToServer(cur, tempRow) {
         warn(e.human);
         throw e;
       }
-      warn('Не удалось создать чат на сервере: ' + errorText(e, e.message) +
-           ' — повторю при отправке.');
+      warn(t('chat.createFailed', { error: errorText(e, e.message) }));
       throw e;
     });
   state.chatReady.catch(() => {});   // отловлено — ждут потребители
@@ -632,7 +636,7 @@ function dropTempChat(cur, tempRow) {
 function saveChatModel(cur) {
   const doPut = () => api('PUT', `/api/chats/${cur.id}`,
                           { model: `${cur.provider}/${cur.model}` })
-    .catch(() => warn('Выбор модели не сохранился на сервере — попробуй ещё раз.'));
+    .catch(() => warn(t('chat.modelSaveFailed')));
   if (state.chatReady) state.chatReady.then(doPut, () => {});
   else doPut();
 }
@@ -674,30 +678,34 @@ function closeSheets() {
 }
 
 /* ================= «думает» с таймером и микрокопи ================= */
-const THINK_PHRASES = ['читаю запрос…', 'обдумываю ответ…', 'проверяю детали…',
-                       'формулирую…', 'думаю дальше…'];
+const THINK_PHRASES = ['message.waiting', 'message.thinking', 'message.checking',
+                       'message.formulating', 'message.thinkingMore'];
+function setThinkingLabel(container, key) {
+  if (!container) return;
+  const seconds = container.querySelector('.think-s');
+  container.dataset.thinkKey = key;
+  container.textContent = t(key) + ' ';
+  if (seconds) container.appendChild(seconds);
+}
 function startThinking(bubble) {
   bubble.innerHTML = '<div class="think"><span class="dots"><i></i><i></i><i></i></span>' +
-    '<span class="think-txt">' + THINK_PHRASES[0] + ' <b class="think-s">0с</b></span></div>';
+    '<span class="think-txt" data-think-key="message.waiting">' + esc(t('message.waiting')) +
+    ' <b class="think-s" data-seconds="0">0 ' + esc(t('message.seconds')) + '</b></span></div>';
   const t0 = Date.now();
   let pi = 0;
   state.thinkTimer = setInterval(() => {
     const sec = Math.round((Date.now() - t0) / 1000);
     const el = bubble.querySelector('.think-s');
-    if (el) el.textContent = sec + 'с';
+    if (el) {
+      el.dataset.seconds = String(sec);
+      el.textContent = new Intl.NumberFormat(getLocale()).format(sec) + ' ' + t('message.seconds');
+    }
     if (sec % 5 === 0 && sec > 0) {
       pi = (pi + 1) % THINK_PHRASES.length;
-      const tx = bubble.querySelector('.think-txt');
-      if (tx) tx.firstChild.textContent = THINK_PHRASES[pi] + ' ';
+      setThinkingLabel(bubble.querySelector('.think-txt'), THINK_PHRASES[pi]);
     }
-    if (sec === 25) {
-      const tx = bubble.querySelector('.think-txt');
-      if (tx) tx.firstChild.textContent = 'ответ длинный, всё ещё думаю… ';
-    }
-    if (sec === 75) {
-      const tx = bubble.querySelector('.think-txt');
-      if (tx) tx.firstChild.textContent = 'долго: модель с фото думает или сеть медленная — можно остановить стоп-кнопкой и повторить ';
-    }
+    if (sec === 25) setThinkingLabel(bubble.querySelector('.think-txt'), 'message.longWait');
+    if (sec === 75) setThinkingLabel(bubble.querySelector('.think-txt'), 'message.veryLongWait');
   }, 1000);
 }
 function stopThinking() {
@@ -713,7 +721,7 @@ function clearAttach() {
 
 function compressImage(file) {
   if (!file || !/^image\//.test(String(file.type || ''))) {
-    return warn('Принимаю только фото — остальные файлы пока не умею.');
+    return warn(t('photo.onlyImages'));
   }
   const reader = new FileReader();
   reader.onload = () => {
@@ -732,10 +740,10 @@ function compressImage(file) {
       autosize();
       haptic('light');
     };
-    img.onerror = () => warn('Не удалось прочитать картинку.');
+    img.onerror = () => warn(t('photo.readFailed'));
     img.src = reader.result;
   };
-  reader.onerror = () => warn('Не удалось открыть файл.');
+  reader.onerror = () => warn(t('photo.openFailed'));
   reader.readAsDataURL(file);
 }
 
@@ -747,13 +755,15 @@ function loadPrefs() {
   state.theme = p.theme || 'system';
   state.accent = p.accent || 'blue';
   state.haptics = p.haptics !== false;
+  state.language = normalizeLanguage(p.language || getLanguage());
+  setLanguage(state.language);
   state.pins = Array.isArray(p.pins) ? p.pins : [];
 }
 function savePrefs() {
   try {
     localStorage.setItem(PREFS_KEY, JSON.stringify({
       theme: state.theme, accent: state.accent, haptics: state.haptics,
-      pins: state.pins,
+      language: state.language, pins: state.pins,
     }));
   } catch (e) { /* приватный режим — не страшно */ }
 }
@@ -940,10 +950,10 @@ async function send(opts = {}) {
     // фото есть, подписи нет: сервер ждёт текст вопроса — подсказываем
     haptic('light');
     if (input) { try { input.focus(); } catch (e) { /* необязательно */ } }
-    return warn('Допиши, что сделать с фото — одним предложением.');
+    return warn(t('photo.addQuestion'));
   }
   if (!text && !(regen && lastU && lastU.image)) return;
-  if (!INIT_DATA) return showFatal('Нет данных Telegram. Открой приложение из чата с ботом.');
+  if (!INIT_DATA) return showFatal(t('error.noTelegram'));
   try {
     if (!state.current) await createChat();
     else if (state.chatReady) {
@@ -952,7 +962,7 @@ async function send(opts = {}) {
     }
   } catch (e) {
     if (e.kind === 'subscribe' || e.kind === 'maintenance') return gateForError(e);
-    return warn(e.human || ('Не удалось создать чат: ' + errorText(e, e.message)));
+    return warn(e.human || t('chat.createFailed', { error: errorText(e, e.message) }));
   }
   const cur = state.current;
   const img = regen ? ((lastU && lastU.image) || null) : state.pendingImage;
@@ -961,8 +971,9 @@ async function send(opts = {}) {
     cur.messages.push({ role: 'user', content: text, image: img || undefined });
     clearAttach();
     if (opts.text == null) { input.value = ''; autosize(); }
-    if (cur.title === 'Новый чат') {
+    if (cur.isNew) {
       cur.title = text.slice(0, 40) + (text.length > 40 ? '…' : '');
+      cur.isNew = false;
       updateHead();
     }
     $('#empty').hidden = true;
@@ -1012,8 +1023,11 @@ async function send(opts = {}) {
       cur.provider = r.provider;
       cur.model = r.model;
       updateHead();
-      warn(`⚡ ${shortModel(from.model)}: ${FALL_REASON[from.code] || from.code} → ` +
-           `переключил на ${shortModel(r.model)}. Выбор обновлён.`);
+      const reasonKey = FALL_REASON[from.code];
+      warn(t('message.fallback', {
+        from: shortModel(from.model), reason: reasonKey ? t(reasonKey) : from.code,
+        to: shortModel(r.model),
+      }));
       api('GET', '/api/models').then((j) => { state.models = j.models || []; })
         .catch(() => {});
     }
@@ -1031,7 +1045,7 @@ async function send(opts = {}) {
                   model: `${cur.provider}/${cur.model}` });
       const row = state.chats.find(c => c.id === cur.id);
       if (row) { row.title = cur.title; row.updated_at = new Date().toISOString(); }
-    } catch (e) { warn('Ответ получен, но не сохранился в историю: ' + e.message); }
+    } catch (e) { warn(t('message.saveFailed', { error: e.message })); }
   } catch (e) {
     stopThinking();
     pending.classList.remove('pending', 'streaming');
@@ -1042,17 +1056,14 @@ async function send(opts = {}) {
         renderRich(pending, part);
         const note = document.createElement('div');
         note.className = 'stop-note';
-        note.textContent = stopped
-          ? '■ остановлено — сохранил сгенерированную часть'
-          : '■ связь оборвалась на середине — сохранил готовую часть';
+        note.dataset.i18n = stopped ? 'message.stoppedSaved' : 'message.disconnectedSaved';
+        note.textContent = t(note.dataset.i18n);
         pending.appendChild(note);
         cur.messages.push({ role: 'assistant', content: part });
-        warn(stopped
-          ? 'Генерацию остановили: сохранил то, что успело напечататься.'
-          : 'Ответ оборвался, повторить не удалось — дописал готовую часть.');
+        warn(t(stopped ? 'message.stoppedSavedToast' : 'message.disconnectedToast'));
       } else {
         pending.remove();
-        warn('Генерацию остановили.');
+        warn(t('message.stoppedToast'));
       }
       return;
     }
@@ -1064,7 +1075,7 @@ async function send(opts = {}) {
         console.info('[diag]', d.last_chat, d.models);
       } catch (e2) { /* старый сервер без /api/debug */ }
     }
-    pending.textContent = '⚠️ ' + errorText(e, 'Не получилось ответить.');
+    pending.textContent = '⚠️ ' + errorText(e, t('message.replyFailed'));
     if (e.kind === 'quota' && state.quota && !state.quota.unlimited) {
       state.quota.left_day = 0;
       renderQuota();
@@ -1072,14 +1083,16 @@ async function send(opts = {}) {
     if (e.kind === 'subscribe' && e.channelUrl) {
       const sb = document.createElement('button');
       sb.className = 'retry-btn';
-      sb.textContent = 'Подписаться';
+      sb.dataset.i18n = 'app.subscribe';
+      sb.textContent = t('app.subscribe');
       sb.onclick = () => { haptic('light'); openExternal(e.channelUrl); };
       pending.appendChild(sb);
       pending.appendChild(document.createTextNode(' '));
     }
     const rb = document.createElement('button');
     rb.className = 'retry-btn';
-    rb.textContent = 'Повторить';
+    rb.dataset.i18n = 'message.retry';
+    rb.textContent = t('message.retry');
     rb.onclick = () => { rb.remove(); send({ regen: true }); };
     pending.appendChild(rb);
     warn('');
@@ -1106,7 +1119,11 @@ function setSendUI(busy) {
   const ico = $('#send-ico');
   b.classList.toggle('stopping', !!busy);
   if (ico) ico.innerHTML = busy ? IC.stop : IC.send;
-  b.setAttribute('aria-label', busy ? 'остановить генерацию' : 'отправить');
+  const sendLabel = busy ? t('composer.stop') : t('composer.send');
+  b.title = sendLabel;
+  b.dataset.i18nTitle = busy ? 'composer.stop' : 'composer.send';
+  b.setAttribute('aria-label', sendLabel);
+  b.dataset.i18nAriaLabel = busy ? 'composer.stop' : 'composer.send';
   /* «печатает…» в шапке + бегущая полоса под ней */
   const c = $('#composer');
   if (c) c.classList.toggle('busy', !!busy);
@@ -1115,7 +1132,7 @@ function setSendUI(busy) {
   const h = $('#head-hint');
   if (h) {
     h.hidden = !busy;
-    h.textContent = busy ? 'печатает…' : '';
+    h.textContent = busy ? t('composer.typing') : '';
   }
 }
 
@@ -1129,10 +1146,11 @@ function autosize() {
 }
 
 /* ================= настройки (груп-карточки) ================= */
-const THEMES = [['system', 'Системное'], ['dark', 'Тёмное'], ['light', 'Светлое']];
-const ACCENTS = [['blue', 'Синий'], ['violet', 'Фиолетовый'],
-                 ['green', 'Зелёный'], ['orange', 'Оранжевый']];
-const ONOFF = (v) => (v ? 'Вкл' : 'Выкл');
+const THEMES = [['system', 'settings.theme.system'], ['dark', 'settings.theme.dark'],
+                ['light', 'settings.theme.light']];
+const ACCENTS = [['blue', 'settings.accent.blue'], ['violet', 'settings.accent.violet'],
+                 ['green', 'settings.accent.green'], ['orange', 'settings.accent.orange']];
+const ONOFF = (v) => t(v ? 'settings.on' : 'settings.off');
 
 /* Раскрывающийся блок настроек: открыт всегда только один. */
 function toggleExpand(segSel, rowSel) {
@@ -1151,8 +1169,9 @@ function toggleExpand(segSel, rowSel) {
 function renderSettings() {
   const th = THEMES.find((t) => t[0] === state.theme) || THEMES[0];
   const ac = ACCENTS.find((a) => a[0] === state.accent) || ACCENTS[0];
-  $('#set-theme-val').textContent = th[1];
-  $('#set-accent-val').innerHTML = '<i class="acc-dot"></i>' + ac[1];
+  $('#set-theme-val').textContent = t(th[1]);
+  $('#set-accent-val').innerHTML = '<i class="acc-dot"></i>' + esc(t(ac[1]));
+  $('#set-language-val').textContent = getLanguageInfo(state.language).name;
   $('#set-haptics-val').textContent = ONOFF(state.haptics);
   const sw = $('#set-haptics');
   if (sw) sw.setAttribute('aria-checked', state.haptics ? 'true' : 'false');
@@ -1162,8 +1181,13 @@ function renderSettings() {
   document.querySelectorAll('[data-accent-opt]').forEach((b) => {
     b.classList.toggle('active', b.dataset.accentOpt === state.accent);
   });
+  document.querySelectorAll('[data-language-opt]').forEach((b) => {
+    const selected = b.dataset.languageOpt === state.language;
+    b.classList.toggle('active', selected);
+    b.setAttribute('aria-pressed', selected ? 'true' : 'false');
+  });
   $('#set-model-val').textContent = state.current && state.current.provider
-    ? shortModel(state.current.model) : 'Авто';
+    ? shortModel(state.current.model) : t('settings.auto');
   const v = $('#set-version');
   if (v) v.textContent = __APP_V;
   const vm = $('#set-version-mini');
@@ -1180,21 +1204,66 @@ function renderSettings() {
   /* профиль из Telegram initData */
   const u = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
   const name = u ? [u.first_name, u.last_name].filter(Boolean).join(' ') : '';
-  $('#set-name').textContent = name || 'Гость Telegram';
+  $('#set-name').textContent = name || t('settings.guestTelegram');
   const initials = (u ? (u.first_name || '') + ' ' + (u.last_name || '') : '')
     .trim().split(/\s+/).map((w) => w[0] || '').join('').slice(0, 2).toUpperCase();
-  $('#set-avatar').firstChild.textContent = initials || 'ГО';
+  $('#set-avatar').firstChild.textContent = initials || 'TG';
 }
 
-/* ================= меню чата (карточка у правого верхнего угла) ========== */
+function refreshLocalizedUI() {
+  state.language = getLanguage();
+  if (state.current && state.current.isNew && !state.current.messages.length) {
+    state.current.title = t('chat.newTitle');
+    const row = state.chats.find((chat) => chat.id === state.current.id);
+    if (row) row.title = state.current.title;
+  }
+  applyI18n(document);
+  updateHead();
+  renderSettings();
+  renderChatsList();
+  renderModelTabs();
+  renderModelsList();
+  renderSupport();
+  renderQuota();
+  buildQuickActions();
+  if (!$('#chat-menu').hidden && state.current) {
+    $('#cm-title').textContent = state.current.title || t('chat.title');
+    $('#cm-pin-tx').textContent = state.pins.includes(state.current.id)
+      ? t('chat.unpin') : t('chat.pin');
+  }
+  if (!$('#find-sheet').hidden) renderFind($('#find-input').value);
+  if (!$('#files-sheet').hidden) openFilesSheet();
+  if (state.busy) {
+    document.querySelectorAll('#messages .think-txt').forEach((el) => {
+      setThinkingLabel(el, el.dataset.thinkKey || 'message.thinking');
+      const seconds = el.querySelector('.think-s');
+      if (seconds) seconds.textContent = new Intl.NumberFormat(getLocale())
+        .format(Number(seconds.dataset.seconds || 0)) + ' ' + t('message.seconds');
+    });
+  } else {
+    const messages = $('#messages');
+    const top = messages ? messages.scrollTop : 0;
+    const following = state.stickBottom;
+    paintMessages();
+    if (!following && messages && !messages.hidden) {
+      requestAnimationFrame(() => {
+        messages.scrollTop = top;
+        state.stickBottom = false;
+        updateFab();
+      });
+    }
+  }
+}
+
+/* ================= chat menu (card near the upper-right corner) ========== */
 function openChatMenu() {
   const cur = state.current;
   if (!cur) { openSheet('#data-sheet'); return; }
   const form = $('#cm-rename-form');
   if (form) form.hidden = true;
-  $('#cm-title').textContent = cur.title || 'Чат';
+  $('#cm-title').textContent = cur.title || t('chat.title');
   $('#cm-pin-tx').textContent = state.pins.includes(cur.id)
-    ? 'Открепить' : 'Закрепить';
+    ? t('chat.unpin') : t('chat.pin');
   $('#menu-scrim').hidden = false;
   $('#chat-menu').hidden = false;
 }
@@ -1241,13 +1310,13 @@ async function applyRename() {
     if (!String(cur.id).startsWith('local-')) {
       await api('PUT', `/api/chats/${cur.id}`, { title });
     }
-    warn('Название обновлено.', 'ok');
+    warn(t('chat.renamed'), 'ok');
   } catch (e) {
     cur.title = old;
     if (row) row.title = old;
     updateHead();
     renderChatsList();
-    warn('Не удалось переименовать: ' + errorText(e, e.message));
+    warn(t('chat.renameFailed', { error: errorText(e, e.message) }));
   }
   closeChatMenu();
 }
@@ -1255,8 +1324,8 @@ async function applyRename() {
 function chatDigest() {
   const cur = state.current;
   if (!cur) return '';
-  return (cur.title || 'Чат') + '\n\n' + cur.messages.slice(-8)
-    .map((m) => (m.role === 'user' ? 'Я: ' : 'Сперанский: ') + m.content)
+  return (cur.title || t('chat.title')) + '\n\n' + cur.messages.slice(-8)
+    .map((m) => (m.role === 'user' ? t('chat.digestYou') : t('chat.digestAssistant')) + m.content)
     .join('\n\n');
 }
 
@@ -1268,7 +1337,10 @@ function openFilesSheet() {
     .map((m, i) => ({ m, i }))
     .filter((x) => x.m.image);
   if (!imgs.length) {
-    box.innerHTML = '<div class="sheet-empty">В этом чате ещё нет файлов.</div>';
+    const empty = document.createElement('div');
+    empty.className = 'sheet-empty';
+    empty.textContent = t('chat.noFiles');
+    box.appendChild(empty);
   }
   for (const x of imgs) {
     const row = document.createElement('div');
@@ -1278,9 +1350,12 @@ function openFilesSheet() {
     thumb.src = x.m.image;
     const info = document.createElement('div');
     const name = document.createElement('div');
-    name.textContent = 'фото к сообщению ' + (x.i + 1);
+    name.dataset.i18n = 'chat.fileName';
+    name.dataset.i18nParams = JSON.stringify({ number: new Intl.NumberFormat(getLocale()).format(x.i + 1) });
+    name.textContent = t('chat.fileName', { number: new Intl.NumberFormat(getLocale()).format(x.i + 1) });
     const hint = document.createElement('small');
-    hint.textContent = 'нажми, чтобы рассмотреть';
+    hint.dataset.i18n = 'chat.fileHint';
+    hint.textContent = t('chat.fileHint');
     info.appendChild(name);
     info.appendChild(hint);
     row.appendChild(thumb);
@@ -1294,7 +1369,8 @@ function openFilesSheet() {
       big.style.cssText = 'width:100%;border-radius:16px;margin:8px 0';
       const back = document.createElement('div');
       back.className = 'find-row';
-      back.textContent = '← ко всем файлам';
+      back.textContent = t('chat.backToFiles');
+      back.dataset.i18n = 'chat.backToFiles';
       back.onclick = openFilesSheet;
       box.appendChild(big);
       box.appendChild(back);
@@ -1317,8 +1393,10 @@ function renderFind(q) {
   const cur = state.current;
   const qq = (q || '').trim().toLowerCase();
   if (!cur || !qq) {
-    box.innerHTML = '<div class="sheet-empty">Печатай — найду по всем ' +
-      'сообщениям этого чата.</div>';
+    const empty = document.createElement('div');
+    empty.className = 'sheet-empty';
+    empty.textContent = t('chat.findHint');
+    box.appendChild(empty);
     return;
   }
   let n = 0;
@@ -1330,10 +1408,15 @@ function renderFind(q) {
     const row = document.createElement('div');
     row.className = 'find-row';
     const snip = tx.slice(Math.max(0, at - 30), at + 60);
-    row.innerHTML = '<div>' + esc(snip).replace(
+    const snippet = document.createElement('div');
+    snippet.innerHTML = esc(snip).replace(
       new RegExp(esc(qq).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'),
-      '<b>$&</b>') + '</div><small>' +
-      (m.role === 'user' ? 'твоё сообщение' : 'ответ') + ' #' + (i + 1) + '</small>';
+      '<b>$&</b>');
+    const meta = document.createElement('small');
+    meta.textContent = t(m.role === 'user' ? 'chat.yourMessage' : 'chat.answer') + ' #' +
+      new Intl.NumberFormat(getLocale()).format(i + 1);
+    row.appendChild(snippet);
+    row.appendChild(meta);
     row.onclick = () => {
       closeSheets();
       const el = document.querySelector('[data-mi="' + i + '"]');
@@ -1345,7 +1428,12 @@ function renderFind(q) {
     };
     box.appendChild(row);
   });
-  if (!n) box.innerHTML = '<div class="sheet-empty">Не нашлось.</div>';
+  if (!n) {
+    const empty = document.createElement('div');
+    empty.className = 'sheet-empty';
+    empty.textContent = t('chat.findNone');
+    box.appendChild(empty);
+  }
 }
 
 /* ================= квота запросов ================= */
@@ -1370,7 +1458,7 @@ function renderSupport() {
   if (!url && !p.free) { row.hidden = true; row.onclick = null; return; }
   row.hidden = false;
   row.classList.toggle('link', !!url);
-  row.innerHTML = esc(url ? 'Поддержать · бесплатно' : 'Бесплатно') +
+  row.innerHTML = esc(t(url ? 'support.sponsorFree' : 'support.free')) +
     (note ? '<small>' + esc(note) + '</small>' : '');
   row.title = note || '';
   row.onclick = url ? () => { haptic('light'); openExternal(url); } : null;
@@ -1396,11 +1484,13 @@ async function loadStats() {
   const tEl = $('#set-stat-total');
   const dEl = $('#set-stat-today');
   const qEl = $('#set-stat-quota');
-  if (qEl) qEl.textContent = '∞ без лимитов';
+  if (qEl) qEl.textContent = t('quota.unlimited');
   try {
     const j = await api('GET', '/api/stats');
-    if (tEl) tEl.textContent = String(j.total != null ? j.total : '—');
-    if (dEl) dEl.textContent = String(j.today != null ? j.today : '—');
+    const formatCount = (value) => value != null && Number.isFinite(Number(value))
+      ? new Intl.NumberFormat(getLocale()).format(Number(value)) : '—';
+    if (tEl) tEl.textContent = formatCount(j.total);
+    if (dEl) dEl.textContent = formatCount(j.today);
   } catch (e) {
     if (tEl) tEl.textContent = '—';
     if (dEl) dEl.textContent = '—';
@@ -1414,10 +1504,12 @@ function renderQuota() {
     else {
       pill.hidden = false;
       if (q.unlimited) {
-        pill.textContent = '∞ без лимитов';
+        pill.textContent = t('quota.unlimited');
         pill.className = 'quota-pill inf';
       } else {
-        pill.textContent = 'сегодня осталось: ' + q.left_day;
+        pill.textContent = t('quota.todayLeft', {
+          count: new Intl.NumberFormat(getLocale()).format(q.left_day),
+        });
         pill.className = 'quota-pill' + (q.left_day <= 5 ? ' low' : '');
       }
     }
@@ -1428,9 +1520,11 @@ function renderQuota() {
   if (!hint || !hintTx) return;
   if (q && !q.unlimited && q.left_day <= 5) {
     hintTx.textContent = q.left_day > 0
-      ? 'Осталось ' + q.left_day + ' ' +
-        plural(q.left_day, 'запрос', 'запроса', 'запросов') + ' на сегодня'
-      : 'Лимит на сегодня исчерпан — обновится завтра';
+      ? t('quota.remaining', {
+        count: new Intl.NumberFormat(getLocale()).format(q.left_day),
+        requests: tPlural('quota.request', q.left_day),
+      })
+      : t('quota.exhausted');
     hint.hidden = false;
   } else {
     hint.hidden = true;
@@ -1439,18 +1533,10 @@ function renderQuota() {
 
 /* ================= быстрые действия на пустом экране ================= */
 const QUICK = [
-  { icon: 'pen', tx: 'Написать текст',
-    full: 'Помоги написать или разобрать текст',
-    put: 'Помоги написать или разобрать текст: ' },
-  { icon: 'check2', tx: 'Проверить',
-    full: 'Проверить текст или решение',
-    put: 'Проверь текст или решение: найди ошибки и подскажи, как исправить: ' },
-  { icon: 'bulb', tx: 'Объяснить',
-    full: 'Объяснить простыми словами',
-    put: 'Объясни простыми словами, с примером: ' },
-  { icon: 'plan', tx: 'Составить план',
-    full: 'Составить понятный пошаговый план',
-    put: 'Составь понятный пошаговый план: ' },
+  { icon: 'pen', tx: 'quick.write', full: 'quick.writeTitle', put: 'quick.writePrompt' },
+  { icon: 'check2', tx: 'quick.check', full: 'quick.checkTitle', put: 'quick.checkPrompt' },
+  { icon: 'bulb', tx: 'quick.explain', full: 'quick.explainTitle', put: 'quick.explainPrompt' },
+  { icon: 'plan', tx: 'quick.plan', full: 'quick.planTitle', put: 'quick.planPrompt' },
 ];
 function buildQuickActions() {
   const box = $('#quick-actions');
@@ -1460,13 +1546,14 @@ function buildQuickActions() {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'qa-tile';
-    b.title = q.full;
+    b.title = t(q.full);
+    b.dataset.i18nTitle = q.full;
     b.style.animationDelay = Math.min(i * 60, 240) + 'ms';
-    b.innerHTML = (IC[q.icon] || '') + '<span>' + esc(q.tx) + '</span>';
+    b.innerHTML = (IC[q.icon] || '') + '<span data-i18n="' + q.tx + '">' + esc(t(q.tx)) + '</span>';
     b.onclick = () => {
       haptic('light');
       const inp = $('#input');
-      inp.value = q.put;
+      inp.value = t(q.put);
       autosize();
       inp.focus();
       try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch (e) {}
@@ -1549,8 +1636,7 @@ async function boot() {
   const retry = $('#fatal-retry');
   if (retry) retry.onclick = () => location.reload();
   if (!INIT_DATA) {
-    return showFatal('Открой меня из Telegram: в чате с ботом нажми кнопку ' +
-      'меню (квадратик слева от поля ввода) или кнопку «📱 Открыть приложение».');
+    return showFatal(t('app.noTelegram'));
   }
   /* бесплатный сервер просыпается долго: чтобы стартовый экран не выглядел
      зависшим чёрным квадратом, через пару секунд подсказываем, что это норма */
@@ -1558,7 +1644,7 @@ async function boot() {
     const bt = document.querySelector('.boot-text');
     const boot = $('#boot');
     if (bt && boot && !boot.hidden) {
-      bt.textContent = 'Сервер просыпается после спячки — ещё несколько секунд…';
+      bt.textContent = t('app.serverWaking');
     }
   }, 6000);
   try {
@@ -1576,8 +1662,7 @@ async function boot() {
   } catch (e) {
     clearTimeout(bootHintT);
     if (gateForError(e)) return;
-    return showFatal('Не удалось связаться с ботом: ' + e.message +
-      '. Проверь интернет и попробуй ещё раз.');
+    return showFatal(t('app.connectionFailed', { error: e.message }));
   }
   clearTimeout(bootHintT);
   state.booted = true;
@@ -1669,7 +1754,7 @@ async function boot() {
   document.querySelectorAll('.soon-nav, .soon-chip').forEach((el) => {
     el.onclick = () => {
       haptic('light');
-      warn((el.dataset.soon || 'Раздел') + ' — в разработке, появится в обновлениях.');
+      warn(t('nav.soonMessage', { section: t(el.dataset.soonKey || 'nav.images') }));
     };
   });
 
@@ -1693,7 +1778,19 @@ async function boot() {
     };
   }
 
-  /* ---- настройки ---- */
+  /* ---- settings ---- */
+  $('#set-language').onclick = () => {
+    haptic('light');
+    toggleExpand('#set-language-options', '#set-language');
+  };
+  document.querySelectorAll('[data-language-opt]').forEach((b) => {
+    b.onclick = () => {
+      state.language = setLanguage(b.dataset.languageOpt);
+      savePrefs();
+      refreshLocalizedUI();
+      hapticSel();
+    };
+  });
   $('#set-theme').onclick = () => { haptic('light'); toggleExpand('#set-theme-seg', '#set-theme'); };
   $('#set-accent').onclick = () => { haptic('light'); toggleExpand('#set-accent-seg', '#set-accent'); };
   document.querySelectorAll('[data-theme-opt]').forEach((b) => {
@@ -1720,17 +1817,17 @@ async function boot() {
   wipe.onclick = async () => {
     if (!wipe.dataset.arm) {
       wipe.dataset.arm = '1';
-      wipeLabel.textContent = 'точно стереть? нажми ещё раз';
+      wipeLabel.textContent = t('settings.eraseConfirm');
       clearTimeout(wipe._t);
       wipe._t = setTimeout(() => {
         wipe.dataset.arm = '';
-        wipeLabel.textContent = 'Стереть мою историю';
+        wipeLabel.textContent = t('settings.eraseHistory');
       }, 3000);
       return;
     }
     wipe.dataset.arm = '';
     clearTimeout(wipe._t);
-    wipeLabel.textContent = 'Стереть мою историю';
+    wipeLabel.textContent = t('settings.eraseHistory');
     try {
       await api('DELETE', '/api/chats');
       state.chats = [];
@@ -1739,9 +1836,9 @@ async function boot() {
       paintMessages();
       renderChatsList();
       closeSheets();
-      warn('Вся моя история удалена с сервера.');
+      warn(t('settings.eraseDone'));
     } catch (e) {
-      warn('Не удалось удалить историю: ' + e.message);
+      warn(t('settings.eraseFailed', { error: e.message }));
     }
   };
 
@@ -1774,11 +1871,11 @@ async function boot() {
     const id = state.current && state.current.id;
     if (!id) return;
     const yes = tg && tg.showConfirm
-      ? tg.showConfirm('Удалить этот чат?')
-      : window.confirm('Удалить этот чат?');
+      ? tg.showConfirm(t('chat.deleteConfirm'))
+      : window.confirm(t('chat.deleteConfirm'));
     Promise.resolve(yes).then((ok) => {
       if (!ok) return;
-      deleteChat(id).catch((e) => warn('Не удалось удалить чат: ' + e.message));
+      deleteChat(id).catch((e) => warn(t('chat.deleteFailed', { error: e.message })));
     });
   };
 

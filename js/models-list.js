@@ -1,13 +1,12 @@
-/* Категории и список моделей в шторке выбора. Выделено из app.js; загружается до app.js
-   и разделяет с ним глобальную область (обычный скрипт). */
+/* Model categories and chooser rows. Text labels are resolved through i18n.js. */
 'use strict';
 const CATS = [
-  { id: 'text', title: 'Текстовые и задачи', short: 'Текст', icon: 'catText' },
-  { id: 'code', title: 'Коддинг', short: 'Код', icon: 'catCode',
+  { id: 'text', title: 'model.cat.textTitle', short: 'model.cat.text', icon: 'catText' },
+  { id: 'code', title: 'model.cat.codeTitle', short: 'model.cat.code', icon: 'catCode',
     filter: /code|coder|codestral|leanstral|coder480b/i },
-  { id: 'image', title: 'Генерация изображений', short: 'Картинки',
+  { id: 'image', title: 'model.cat.imagesTitle', short: 'model.cat.images',
     icon: 'catImage', soon: true },
-  { id: 'video', title: 'Генерация видео', short: 'Видео', icon: 'catVideo', soon: true },
+  { id: 'video', title: 'model.cat.videoTitle', short: 'model.cat.video', icon: 'catVideo', soon: true },
 ];
 
 function modelRow(m) {
@@ -15,17 +14,17 @@ function modelRow(m) {
     state.current.model === m.model);
   const row = document.createElement('div');
   row.className = 'model-row ' + (m.state || 'ok') + (mine ? ' active' : '');
-  const t = document.createElement('div');
-  t.className = 'model-row-title';
-  t.innerHTML = logoHtml(m.provider) + ' ' + esc(m.model) +
-    (mine ? '<span class="mr-check" aria-label="выбрана">' + IC.check + '</span>' : '') +
-    (m.vision ? ' <span class="vis-dot" title="понимает фото"></span>' : '');
+  const titleEl = document.createElement('div');
+  titleEl.className = 'model-row-title';
+  titleEl.innerHTML = logoHtml(m.provider) + ' ' + esc(m.model) +
+    (mine ? '<span class="mr-check" aria-label="' + esc(t('model.selected')) + '">' + IC.check + '</span>' : '') +
+    (m.vision ? ' <span class="vis-dot" title="' + esc(t('model.understandsPhoto')) + '"></span>' : '');
   const s2 = document.createElement('div');
   s2.className = 'model-row-sub';
-  s2.textContent = m.provider + ' · ' + (STATE_RU[m.state] || m.state);
+  s2.textContent = m.provider + ' · ' + modelStateLabel(m.state);
   const dot = document.createElement('span');
   dot.className = 'st-dot st-' + (m.state || 'ok');
-  dot.title = STATE_TT[m.state] || 'Статус неизвестен';
+  dot.title = modelStateTitle(m.state);
   dot.setAttribute('aria-label', dot.title);
   row.onclick = () => {
     hapticSel();
@@ -39,11 +38,11 @@ function modelRow(m) {
       createChatOptimistic(m.provider, m.model);
     }
   };
-  row.appendChild(t); row.appendChild(dot); row.appendChild(s2);
+  row.appendChild(titleEl); row.appendChild(dot); row.appendChild(s2);
   return row;
 }
 
-/* Вкладки категорий: Текст / Код / Картинки / Видео */
+/* Category tabs: text / code / images / video. */
 function renderModelTabs() {
   const box = $('#model-tabs');
   if (!box) return;
@@ -55,12 +54,13 @@ function renderModelTabs() {
                   (cat.soon ? ' soon' : '');
     b.setAttribute('role', 'tab');
     b.setAttribute('aria-selected', state.modelTab === cat.id ? 'true' : 'false');
-    b.innerHTML = (IC[cat.icon] || '') + '<span>' + esc(cat.short) + '</span>' +
+    b.setAttribute('aria-label', t(cat.title));
+    b.innerHTML = (IC[cat.icon] || '') + '<span>' + esc(t(cat.short)) + '</span>' +
       (cat.soon ? '<i class="tab-lock">' + IC.lock + '</i>' : '');
     b.onclick = () => {
       if (state.modelTab === cat.id) return;
       state.modelTab = cat.id;
-      /* переход по вкладкам сбрасывает поиск — иначе список «залипает» */
+      /* Switching tabs clears search so results never look stuck. */
       state.modelQuery = '';
       const ms = $('#model-search');
       const mc = $('#model-search-clear');
@@ -79,7 +79,7 @@ function renderModelsList() {
   box.innerHTML = '';
   const cat = CATS.find((c) => c.id === state.modelTab) || CATS[0];
   const q = (state.modelQuery || '').trim().toLowerCase();
-  /* пока сервер не отдал список — показываем скелетон, а не пустоту */
+  /* Show a skeleton while the server is still loading the model catalogue. */
   if (!state.models.length && !cat.soon) {
     if (!state.booted) {
       for (let i = 0; i < 4; i++) {
@@ -90,20 +90,19 @@ function renderModelsList() {
     } else {
       const none = document.createElement('div');
       none.className = 'sheet-empty';
-      none.textContent = 'Сервер не вернул список моделей. Закрой шторку и попробуй ещё раз.';
+      none.textContent = t('model.noneFromServer');
       box.appendChild(none);
     }
     return;
   }
-  /* поиск ищет по всем категориям — так быстрее найти нужную модель */
+  /* Search across every category so users can find a model quickly. */
   if (q) {
     const found = state.models.filter((m) =>
       String(m.model || '').toLowerCase().includes(q) ||
       String(m.provider || '').toLowerCase().includes(q));
     const note = document.createElement('div');
     note.className = 'soon-row';
-    note.textContent = found.length
-      ? 'Поиск по всем категориям' : 'Ничего не нашлось — попробуй другое название.';
+    note.textContent = found.length ? t('model.searchAll') : t('model.searchNone');
     box.appendChild(note);
     const sorted = found.slice().sort((a, b) =>
       (STATE_RANK[a.state] ?? 3) - (STATE_RANK[b.state] ?? 3));
@@ -118,32 +117,29 @@ function renderModelsList() {
     const soon = document.createElement('div');
     soon.className = 'soon-tile soon-tile-big tab-in';
     soon.innerHTML = '<span class="soon-tile-ico">' + (IC[cat.icon] || '') + '</span>' +
-      '<span class="soon-tile-tx"><b>' + esc(cat.title) + '</b>' +
-      '<small>в разработке — появится в следующих обновлениях</small></span>' +
-      '<span class="soon-badge">' + IC.lock + ' скоро</span>';
+      '<span class="soon-tile-tx"><b>' + esc(t(cat.title)) + '</b>' +
+      '<small>' + esc(t('model.inDevelopment')) + '</small></span>' +
+      '<span class="soon-badge">' + IC.lock + ' ' + esc(t('model.soon')) + '</span>';
     box.appendChild(soon);
     return;
   }
   const sorted = state.models.slice().sort((a, b) =>
     (STATE_RANK[a.state] ?? 3) - (STATE_RANK[b.state] ?? 3));
-  // категория с фильтром — свои модели; без фильтра — все, кроме
-  // попавших в другие категории (иначе кодинг-модели дублируются)
+  // A filtered category gets its own models; other categories omit those rows.
   const list = cat.filter
     ? sorted.filter((m) => cat.filter.test(m.model))
     : sorted.filter((m) => !CATS.some((c) => c.filter && c.filter.test(m.model)));
   if (!list.length) {
     const none = document.createElement('div');
     none.className = 'soon-row';
-    none.textContent = 'В этой категории пока нет доступных моделей.';
+    none.textContent = t('model.noneInCategory');
     box.appendChild(none);
     return;
   }
   for (const m of list) box.appendChild(modelRow(m));
-  // мягкое появление списка при смене вкладки
+  // Smoothly reveal rows when switching tabs.
   box.querySelectorAll('.model-row').forEach((el, i) => {
     el.classList.add('tab-in');
     el.style.animationDelay = Math.min(i * 22, 220) + 'ms';
   });
 }
-
-/* ================= оверлеи ================= */
