@@ -1609,18 +1609,21 @@ async function loadStats() {
 function renderQuota() {
   const pill = $('#quota-pill');
   const q = state.quota;
+  /* Пилюля остатка — ещё и вход на экран «Лимиты и приглашения», поэтому
+     цифры берём из limitsView(): она работает и тогда, когда /api/quota не
+     ответил, а поля квоты пришли в boot.policy. */
   if (pill) {
-    if (!q) pill.hidden = true;
-    else {
+    const v = limitsView();
+    if (!v.known || (!v.unlimited && v.left == null)) {
+      pill.hidden = true;
+    } else {
       pill.hidden = false;
-      if (q.unlimited) {
+      if (v.unlimited) {
         pill.textContent = t('quota.unlimited');
         pill.className = 'quota-pill inf';
       } else {
-        pill.textContent = t('quota.todayLeft', {
-          count: new Intl.NumberFormat(getLocale()).format(q.left_day),
-        });
-        pill.className = 'quota-pill' + (q.left_day <= 5 ? ' low' : '');
+        pill.textContent = t('quota.todayLeft', { count: fmtNum(v.left) });
+        pill.className = 'quota-pill' + (v.left <= 5 ? ' low' : '');
       }
     }
   }
