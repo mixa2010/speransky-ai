@@ -6,7 +6,7 @@ const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
 const JS_FILES = [
-  'js/config.js', 'js/api.js', 'js/logos.js', 'js/brand.js', 'js/render.js',
+  'js/i18n.js', 'js/config.js', 'js/api.js', 'js/logos.js', 'js/brand.js', 'js/render.js',
   'js/ui.js', 'js/icons.js', 'js/models.js', 'js/models-list.js', 'app.js',
 ];
 // Все скрипты читаются в порядке загрузки из index.html (обычные скрипты
@@ -82,11 +82,11 @@ test('legacy voice_disabled response becomes a short, non-technical warning', as
   await assert.rejects(api('POST', '/api/legacy-voice', {}), (error) => {
     assert.equal(error.code, 410);
     assert.equal(error.voiceDisabled, true);
-    assert.equal(error.message, 'Голосовой ввод отключён — напишите запрос текстом');
+    assert.equal(error.message, 'Voice input is turned off — please type your message.');
     return true;
   });
   assert.equal(warning.hidden, false);
-  assert.equal(warning.textContent, 'Голосовой ввод отключён — напишите запрос текстом');
+  assert.equal(warning.textContent, 'Voice input is turned off — please type your message.');
 });
 
 test('boot mark animates once for 600 ms, respects reduced motion, and does not delay boot', () => {
@@ -120,7 +120,7 @@ test('503 maintenance, 429 quota, 503 busy, 409 chat_limit and 401 map to readab
     [503, { error: 'busy', message: 'Много запросов, подожди минуту' }, 'busy', 'Много запросов, подожди минуту'],
     [409, { code: 'chat_limit', error: 'Не больше 50 чатов' }, 'chat_limit', 'Не больше 50 чатов'],
     [401, { error: 'unauthorized' }, 'session',
-     'Сессия не подтвердилась. Закрой и открой приложение из чата с ботом.'],
+     'Session could not be verified. Close and reopen the app from the bot chat.'],
   ];
   for (const [status, body, kind, human] of cases) {
     const { api } = loadApi(respond(status, body));
@@ -159,7 +159,7 @@ test('filtered replies do not decrement the quota pill', () => {
 test('brand star is gone: text wordmark stays, «С» с искрой — единый знак', () => {
   assert.doesNotMatch(html, /M12 1l2\.6 8\.4L23 12/);
   assert.doesNotMatch(html, /boot-spark|empty-spark/);
-  assert.match(html, /class="brand-word boot-word"[^>]*><span class="brand-name">Сперанский<\/span><span class="brand-ai">AI<\/span>/);
+  assert.match(html, /class="brand-word boot-word"[^>]*><span class="brand-name" data-i18n="brand\.name">Speransky<\/span><span class="brand-ai">AI<\/span>/);
   /* знак: дуга-«С» и искра ИИ, в шапке — название чата вместо буквы-заглушки */
   assert.match(html, /class="lg-c" d="M14\.2 7\.5A5\.3 5\.3 0 1 0 14\.2 16\.5"/);
   assert.match(html, /class="lg-spark"/);
@@ -199,7 +199,7 @@ test('header keeps the chat context: title, model pill, generation bar', () => {
 test('list of chats is grouped by time and shows human dates', () => {
   assert.match(app, /fmtWhen\(c\.updated_at\)/);
   assert.match(app, /dayBucket\(c\.updated_at\)/);
-  assert.match(app, /'Закреплённые', \[\]/);
+  assert.match(app, /'chat\.group\.pinned', \[\]/);
   assert.doesNotMatch(app, /slice\(5, 16\)/);
 });
 
@@ -251,7 +251,7 @@ test('low quota is warned right above the composer', () => {
   assert.match(html, /id="quota-hint"/);
   assert.match(html, /id="quota-hint-tx"/);
   assert.match(app, /q\.left_day <= 5/);
-  assert.match(app, /plural\(q\.left_day, 'запрос', 'запроса', 'запросов'\)/);
+  assert.match(app, /tPlural\('quota\.request', q\.left_day\)/);
 });
 
 test('code blocks can be copied without leaking the button label', () => {
@@ -263,7 +263,8 @@ test('code blocks can be copied without leaking the button label', () => {
 
 test('empty screen positions a universal assistant, not "school and uni"', () => {
   assert.doesNotMatch(html + app, /школьному и универу/);
-  assert.match(html, /Универсальный помощник: текст, код, объяснение, план, учёба\./);
+  assert.match(html, /Your all-purpose assistant for writing, coding, explanations, planning, and learning\./);
+  assert.match(app, /'empty\.description': 'Универсальный помощник: текст, код, объяснение, план, учёба\./);
   assert.doesNotMatch(app, /Реши задачу по фото|пробник/);
 });
 

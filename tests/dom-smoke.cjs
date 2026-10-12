@@ -20,7 +20,7 @@ try {
 }
 
 const ROOT = path.resolve(__dirname, '..');
-const JS_FILES = ['js/config.js', 'js/api.js', 'js/logos.js', 'js/brand.js', 'js/render.js',
+const JS_FILES = ['js/i18n.js', 'js/config.js', 'js/api.js', 'js/logos.js', 'js/brand.js', 'js/render.js',
   'js/ui.js', 'js/icons.js', 'js/models.js', 'js/models-list.js', 'app.js'];
 const APP = JS_FILES.map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n');
 const HTML = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
@@ -55,6 +55,7 @@ function makeWindow(handler, opts) {
     url: (opts && opts.url) || 'https://app.example/?initData=test', virtualConsole: vc,
   });
   const w = dom.window;
+  if (opts && opts.prefs) w.localStorage.setItem('sp_prefs_v1', JSON.stringify(opts.prefs));
   if (!(opts && opts.noTelegram)) {
     w.Telegram = { WebApp: {
       initData: 'test', colorScheme: 'dark', initDataUnsafe: { user: { first_name: 'Миша' } },
@@ -122,6 +123,9 @@ async function happyPath() {
   const $ = (s) => d.querySelector(s);
   await sleep(80);
 
+  check('first launch defaults to English', d.documentElement.lang === 'en' &&
+    $('#empty-title').textContent === 'Hi! I’m Speransky AI',
+    d.documentElement.lang + ' / ' + $('#empty-title').textContent);
   check('стартовый экран уступает место шапке', $('#boot').hidden === true && $('#head').hidden === false,
     'boot/head видимость');
   check('в шапке название чата и модель',
@@ -166,7 +170,7 @@ async function happyPath() {
   check('текстовая вкладка без кодинг-моделей',
     d.querySelectorAll('#models-list .model-row').length === 2,
     String(d.querySelectorAll('#models-list .model-row').length));
-  const codeTab = [...d.querySelectorAll('.cat-tab')].find((b) => /Код/.test(b.textContent));
+  const codeTab = [...d.querySelectorAll('.cat-tab')].find((b) => /Code/.test(b.textContent));
   codeTab.click();
   await sleep(30);
   check('вкладка «Код» показывает codestral', /codestral/.test($('#models-list').textContent),
@@ -188,6 +192,23 @@ async function happyPath() {
   $('#btn-settings').click();
   await sleep(20);
   check('настройки: имя из Telegram', $('#set-name').textContent === 'Миша', $('#set-name').textContent);
+  check('language selector shows the current native language', $('#set-language-val').textContent === 'English',
+    $('#set-language-val').textContent);
+  $('#set-language').click();
+  await sleep(10);
+  check('language list opens', $('#set-language-options').hidden === false, 'still hidden');
+  d.querySelector('[data-language-opt="ru"]').click();
+  await sleep(20);
+  check('language changes immediately and is saved', d.documentElement.lang === 'ru' &&
+    $('#set-language-val').textContent === 'Русский' &&
+    $('#set-theme').querySelector('span').textContent === 'Оформление' &&
+    $('#btn-new').querySelector('span').textContent === 'Новый чат' &&
+    JSON.parse(w.localStorage.getItem('sp_prefs_v1')).language === 'ru',
+    d.documentElement.lang + ' / ' + $('#set-language-val').textContent);
+  d.querySelector('[data-language-opt="en"]').click();
+  await sleep(20);
+  check('English can be selected again', d.documentElement.lang === 'en' &&
+    $('#set-language-val').textContent === 'English', $('#set-language-val').textContent);
   $('#set-theme').click();
   await sleep(10);
   check('сегменты темы раскрылись', $('#set-theme-seg').hidden === false, 'скрыто');
@@ -254,8 +275,20 @@ async function emptyState() {
   await sleep(40);
   check('новый чат: лента уступает место экрану «Чат готов», без чёрной пустоты',
     d.querySelector('#empty').hidden === false && d.querySelector('#messages').hidden === true &&
-    /Чат готов/.test(d.querySelector('#empty-title').textContent),
+    /Chat is ready/.test(d.querySelector('#empty-title').textContent),
     d.querySelector('#empty-title').textContent);
+  d.querySelector('#btn-chats').click();
+  d.querySelector('#btn-settings').click();
+  d.querySelector('#set-language').click();
+  d.querySelector('[data-language-opt="ru"]').click();
+  await sleep(20);
+  check('an unsent new chat refreshes its generated labels after language change',
+    d.querySelector('#empty-title').textContent === 'Чат готов' &&
+    d.querySelector('#head-title').textContent === 'Новый чат',
+    d.querySelector('#empty-title').textContent + ' / ' + d.querySelector('#head-title').textContent);
+  d.querySelector('[data-language-opt="en"]').click();
+  d.querySelector('#settings-sheet .sheet-close').click();
+  await sleep(20);
   d.querySelector('#input').value = 'привет';
   d.querySelector('#input').dispatchEvent(new w.Event('input'));
   d.querySelector('#btn-send').click();
@@ -265,7 +298,21 @@ async function emptyState() {
     'messages.hidden=' + d.querySelector('#messages').hidden);
 }
 
-/* ================= 2. отказы сервера ================= */
+/* ================= saved locale survives a fresh app session ================= */
+async function restoredLanguage() {
+  const w = makeWindow((u) => {
+    if (u.includes('/api/boot')) return Promise.resolve(json({ models: MODELS, chats: [] }));
+    if (u.includes('/api/quota')) return Promise.resolve(json({ left_day: 9, unlimited: false }));
+    return Promise.resolve(json({}));
+  }, { prefs: { language: 'zh' } });
+  await sleep(80);
+  check('saved language is restored before the app starts',
+    w.document.documentElement.lang === 'zh' &&
+    w.document.querySelector('#empty-title').textContent === '你好！我是 Speransky AI',
+    w.document.documentElement.lang + ' / ' + w.document.querySelector('#empty-title').textContent);
+}
+
+/* ================= 2. server refusal screens ================= */
 async function gates() {
   {
     const w = makeWindow(() => Promise.resolve(json({ code: 'subscribe',
@@ -285,7 +332,7 @@ async function gates() {
       message: 'Техработы до 15:00' }, 503)));
     await sleep(80);
     const d = w.document;
-    check('техработы: заголовок', /Технические работы/.test(d.querySelector('#fatal-title').textContent),
+    check('техработы: заголовок', /Maintenance in progress/.test(d.querySelector('#fatal-title').textContent),
       d.querySelector('#fatal-title').textContent);
     check('техработы: кнопка «Повторить»', d.querySelector('#fatal-retry') !== null, 'нет');
   }
@@ -312,10 +359,10 @@ async function gates() {
       /Лимит на сегодня закончился/.test(d.querySelector('#messages').textContent),
       d.querySelector('#messages').textContent.slice(0, 70));
     check('лимит: кнопка «Повторить»',
-      [...d.querySelectorAll('#messages .retry-btn')].some((b) => /Повторить/.test(b.textContent)),
+      [...d.querySelectorAll('#messages .retry-btn')].some((b) => /Retry/.test(b.textContent)),
       'нет кнопки');
     check('лимит: предупреждение над полем',
-      /исчерпан/.test(d.querySelector('#quota-hint-tx').textContent),
+      /used up|limit/i.test(d.querySelector('#quota-hint-tx').textContent),
       d.querySelector('#quota-hint-tx').textContent);
     check('лимит: ровно один запрос к модели', calls === 1, String(calls));
   }
@@ -323,14 +370,14 @@ async function gates() {
     const w = makeWindow(() => Promise.resolve(json({ error: 'unauthorized' }, 401)));
     await sleep(80);
     check('401: экран сессии',
-      /Сессия не подтвердилась/.test(w.document.querySelector('#fatal-text').textContent),
+      /Session could not be verified/.test(w.document.querySelector('#fatal-text').textContent),
       w.document.querySelector('#fatal-text').textContent);
   }
   {
     const w = makeWindow(() => Promise.resolve(json({})), { noTelegram: true, url: 'https://app.example/' });
     await sleep(60);
     check('без initData: просим открыть из Telegram',
-      /Открой меня из Telegram/.test(w.document.querySelector('#fatal-text').textContent),
+      /Open this app from Telegram/.test(w.document.querySelector('#fatal-text').textContent),
       w.document.querySelector('#fatal-text').textContent);
   }
 }
@@ -338,6 +385,7 @@ async function gates() {
 (async () => {
   await happyPath();
   await emptyState();
+  await restoredLanguage();
   await gates();
   console.log(problems.length ? '\nПРОБЛЕМЫ:\n' + problems.join('\n') : '\nВсё чисто.');
   process.exit(problems.length ? 1 : 0);

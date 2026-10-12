@@ -239,17 +239,20 @@ function addCodeCopy(root) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'code-copy';
-    btn.textContent = 'Копировать';
+    btn.dataset.i18n = 'message.copy';
+    btn.textContent = t('message.copy');
     btn.onclick = (e) => {
       e.stopPropagation();
       const src = pre.querySelector('code');
       const txt = (src || pre).textContent || '';
       if (typeof copyText === 'function') copyText(txt, true);
-      btn.textContent = 'Скопировано';
+      btn.dataset.i18n = 'message.copiedShort';
+      btn.textContent = t('message.copiedShort');
       btn.classList.add('done');
       clearTimeout(btn._t);
       btn._t = setTimeout(() => {
-        btn.textContent = 'Копировать';
+        btn.dataset.i18n = 'message.copy';
+        btn.textContent = t('message.copy');
         btn.classList.remove('done');
       }, 1600);
     };

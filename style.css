@@ -1036,6 +1036,24 @@ body::before {
 [data-accent-opt="orange"] .acc-dot { background: #ff8a3d; }
 /* раскрывающиеся блоки настроек: явный выбор вместо «нажми и угадай» */
 .set-expand { display: flex; flex-wrap: wrap; gap: 8px; padding: 2px 16px 14px; animation: tab-in .24s var(--ease); }
+.language-options {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px;
+  padding: 3px 12px 13px;
+}
+.language-option {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  min-width: 0; padding: 10px 12px; border: 1px solid var(--hair); border-radius: 12px;
+  background: color-mix(in srgb, var(--surface-1) 60%, transparent); color: var(--text);
+  font: inherit; font-size: 14px; text-align: start; cursor: pointer;
+  transition: border-color .16s var(--ease), background .16s var(--ease), transform .16s var(--ease);
+}
+.language-option > span { color: var(--accent); opacity: 0; font-weight: 800; }
+.language-option.active {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-1));
+}
+.language-option.active > span { opacity: 1; }
+.language-option:active { transform: scale(.98); }
 .seg {
   flex: 1 1 auto; min-width: 88px; border: 1px solid var(--hair); border-radius: 999px;
   background: color-mix(in srgb, var(--surface-1) 60%, transparent); color: var(--text);
@@ -1203,3 +1221,20 @@ body::before {
   .chat-menu { top: 66px; }
   .scroll-fab { right: 22px; }
 }
+
+/* Locale-specific direction for Arabic. Keep chat bubbles on their familiar
+   physical sides while letting labels and editable text flow right-to-left. */
+:root[dir="rtl"] .set-row,
+:root[dir="rtl"] .cm-row { text-align: right; }
+:root[dir="rtl"] .set-val::after,
+:root[dir="rtl"] .set-chev { margin-left: 0; margin-right: 2px; transform: rotate(225deg); }
+:root[dir="rtl"] .chat-menu { right: auto; left: 10px; }
+:root[dir="rtl"] .warn { padding: 12px 36px 12px 15px; }
+:root[dir="rtl"] .warn::before { left: auto; right: 14px; }
+:root[dir="rtl"] .msg.user { align-items: flex-start; }
+:root[dir="rtl"] .msg.bot { align-items: flex-end; }
+:root[dir="rtl"] .msg.user .bubble {
+  border-bottom-right-radius: 20px; border-bottom-left-radius: 7px;
+}
+:root[dir="rtl"] pre,
+:root[dir="rtl"] code { direction: ltr; text-align: left; }
